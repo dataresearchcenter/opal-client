@@ -1,7 +1,9 @@
+import click
 import json
 import logging
 import sys
 from importlib.metadata import version
+from requests import HTTPError
 
 from openaleph_client import settings
 from openaleph_client.api import AlephAPI
@@ -9,6 +11,7 @@ from openaleph_client.errors import AlephException
 from openaleph_client.crawldir import crawl_dir
 from openaleph_client.fetchdir import fetch_collection, fetch_entity
 from openaleph_client.load_catalog import load_catalog
+
 
 log = logging.getLogger(__name__)
 
@@ -379,6 +382,8 @@ def _load_catalog(
             )
     except AlephException as exc:
         raise click.ClickException(exc.message)
+    except HTTPError as exc:
+        raise click.ClickException(str(exc))
     except BrokenPipeError:
         raise click.Abort()
 
