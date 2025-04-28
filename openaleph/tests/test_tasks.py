@@ -1,20 +1,20 @@
 import os
 from pathlib import Path
 
-from alephclient.crawldir import crawl_dir
-from alephclient.api import AlephAPI
+from openaleph.crawldir import crawl_dir
+from openaleph.api import AlephAPI
 
 
 class TestTasks(object):
     def setup_method(self):
-        self.api = AlephAPI(host="http://aleph.test/api/2/", api_key="fake_key")
+        self.api = AlephAPI(host="http://openaleph.test/api/2/", api_key="fake_key")
 
     def test_new_collection(self, mocker):
         mocker.patch.object(self.api, "filter_collections", return_value=[])
         mocker.patch.object(self.api, "create_collection")
         mocker.patch.object(self.api, "update_collection")
         mocker.patch.object(self.api, "ingest_upload")
-        crawl_dir(self.api, "alephclient/tests/testdata", "test153", {}, True, True)
+        crawl_dir(self.api, "openaleph/tests/testdata", "test153", {}, True, True)
         self.api.create_collection.assert_called_once_with(
             {
                 "category": "other",
@@ -62,7 +62,7 @@ class TestTasks(object):
         assert res["id"] == 24
         self.api.delete_entity(res["id"])
         self.api._request.assert_called_once_with(
-            "DELETE", "http://aleph.test/api/2/entities/24"
+            "DELETE", "http://openaleph.test/api/2/entities/24"
         )
 
     def test_ingest(self, mocker):
@@ -71,8 +71,8 @@ class TestTasks(object):
             self.api, "load_collection_by_foreign_id", return_value={"id": 2}
         )
         mocker.patch.object(self.api, "update_collection")
-        crawl_dir(self.api, "alephclient/tests/testdata", "test153", {}, True, True)
-        base_path = os.path.abspath("alephclient/tests/testdata")
+        crawl_dir(self.api, "openaleph/tests/testdata", "test153", {}, True, True)
+        base_path = os.path.abspath("openaleph/tests/testdata")
         assert self.api.ingest_upload.call_count == 6
         expected_calls = [
             mocker.call(

@@ -4,7 +4,7 @@ from pathlib import Path
 from pprint import pprint  # noqa
 from typing import Optional, Dict
 
-from alephclient.api import AlephAPI
+from openaleph.api import AlephAPI
 
 log = logging.getLogger(__name__)
 

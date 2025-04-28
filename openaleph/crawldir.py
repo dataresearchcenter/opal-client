@@ -8,10 +8,9 @@ from queue import Queue
 from pathlib import Path, PurePath
 from typing import cast, Optional, Dict
 
-from alephclient import settings
-from alephclient.api import AlephAPI
-from alephclient.errors import AlephException
-from alephclient.util import backoff
+from openaleph.api import AlephAPI
+from openaleph.errors import AlephException
+from openaleph.util import backoff
 
 log = logging.getLogger(__name__)
 

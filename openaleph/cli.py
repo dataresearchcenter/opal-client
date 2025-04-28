@@ -4,11 +4,11 @@ import logging
 import sys
 from pathlib import Path
 
-from alephclient import settings
-from alephclient.api import AlephAPI
-from alephclient.errors import AlephException
-from alephclient.crawldir import crawl_dir
-from alephclient.fetchdir import fetch_collection, fetch_entity
+from openaleph import settings
+from openaleph.api import AlephAPI
+from openaleph.errors import AlephException
+from openaleph.crawldir import crawl_dir
+from openaleph.fetchdir import fetch_collection, fetch_entity
 
 log = logging.getLogger(__name__)
 
@@ -28,13 +28,13 @@ def _write_result(stream, result):
 
 @click.group()
 @click.option(
-    "--host", default=settings.HOST, metavar="HOST", help="Aleph API host URL"
+    "--host", default=settings.HOST, metavar="HOST", help="OpenAleph API host URL"
 )
 @click.option(
     "--api-key",
     default=settings.API_KEY,
     metavar="KEY",
-    help="Aleph API key for authentication",
+    help="OpenAleph API key for authentication",
 )
 @click.option(
     "-r",
@@ -45,13 +45,13 @@ def _write_result(stream, result):
 )
 @click.pass_context
 def cli(ctx, host, api_key, retries):
-    """API client for Aleph API"""
+    """API client for OpenAleph API"""
     logging.basicConfig(level=logging.DEBUG)
     logging.getLogger("requests").setLevel(logging.WARNING)
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     logging.getLogger("httpstream").setLevel(logging.WARNING)
     if not host:
-        raise click.BadParameter("Missing Aleph host URL")
+        raise click.BadParameter("Missing OpenAleph host URL")
     if ctx.obj is None:
         ctx.obj = {}
     ctx.obj["api"] = AlephAPI(host, api_key, retries=retries)
@@ -135,7 +135,7 @@ def crawldir(
 )
 @click.pass_context
 def fetchdir(ctx, foreign_id, prefix=None, entity_id=None, overwrite=False):
-    """Recursively download the contents of an Aleph entity or collection and rebuild
+    """Recursively download the contents of an OpenAleph entity or collection and rebuild
     them as a folder tree."""
     try:
         api = ctx.obj["api"]

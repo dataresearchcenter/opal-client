@@ -1,12 +1,12 @@
-from alephclient.api import AlephAPI, APIResultSet
+from openaleph.api import AlephAPI, APIResultSet
 
 
 class TestApiSearch:
-    fake_url = "http://aleph.test/api/2/"
+    fake_url = "http://openaleph.test/api/2/"
     fake_query = "fleem"
 
     def setup_method(self, mocker):
-        self.api = AlephAPI(host="http://aleph.test/api/2/", api_key="fake_key")
+        self.api = AlephAPI(host="http://openaleph.test/api/2/", api_key="fake_key")
 
     def test_search(self, mocker):
         mocker.patch.object(self.api, "_request")

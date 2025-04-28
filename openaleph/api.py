@@ -11,13 +11,13 @@ from requests.exceptions import HTTPError
 from requests_toolbelt import MultipartEncoder  # type: ignore
 from typing import Dict, Mapping, Iterable, Iterator, List, Optional, Any
 
-from alephclient import settings
-from alephclient.errors import AlephException
-from alephclient.util import backoff, prop_push
+from openaleph import settings
+from openaleph.errors import AlephException
+from openaleph.util import backoff, prop_push
 
 log = logging.getLogger(__name__)
 MIME = "application/octet-stream"
-VERSION = importlib.metadata.version("alephclient")
+VERSION = importlib.metadata.version("openaleph")
 
 
 class APIResultSet(object):
@@ -95,7 +95,7 @@ class AlephAPI(object):
         session_id = session_id or str(uuid.uuid4())
         self.session: Session = Session()
         self.session.headers["X-Aleph-Session"] = session_id
-        self.session.headers["User-Agent"] = "alephclient/%s" % VERSION
+        self.session.headers["User-Agent"] = "openaleph/%s" % VERSION
         if api_key is not None:
             self.session.headers["Authorization"] = "ApiKey %s" % api_key
 
