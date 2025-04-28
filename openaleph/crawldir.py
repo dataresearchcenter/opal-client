@@ -1,9 +1,10 @@
 import logging
 import threading
 import re
-import stat
+import sqlite3
+import signal
+import sys
 import os
-from os import PathLike
 from queue import Queue
 from pathlib import Path, PurePath
 from typing import cast, Optional, Dict
@@ -37,6 +38,8 @@ class CrawlDirectory(object):
         self.collection = collection
         self.collection_id = cast(str, collection.get("id"))
         self.root = path
+        self._db_conn: sqlite3.Connection = None
+        self._db_lock = threading.Lock()
         self.queue: Queue = Queue()
         self.scan_queue: Queue = Queue()
         if path.is_dir():
@@ -56,16 +59,31 @@ class CrawlDirectory(object):
             self.scan_queue.task_done()
 
     def consume(self):
+        """Worker thread: upload files, skipping those already processed."""
         while True:
             path, parent_id = self.queue.get()
-            # None value for path is used as poison, to signal end.
+            # Poison‐pill sentinel
             if path is None:
                 self.queue.task_done()
                 break
-            self.backoff_ingest_upload(path, parent_id, self.get_foreign_id(Path(path)))
+
+            rel = str(Path(path).relative_to(self.root))
+            with self._db_lock:
+                cur = self._db_conn.execute("SELECT 1 FROM processed WHERE path = ?", (rel,))
+                if cur.fetchone():
+                    self.queue.task_done()
+                    log.info("Skipping [%s->%s]: %s", self.collection_id, parent_id, rel)
+                    continue # if in db skip
+
+            log.info("Upload [%s->%s]: %s", self.collection_id, parent_id, rel)
+            result = self.backoff_ingest_upload(path, parent_id, self.get_foreign_id(Path(path)))
+            if result: # add path to db
+                with self._db_lock:
+                    self._db_conn.execute( "INSERT OR IGNORE INTO processed(path) VALUES(?)",(rel,))
+                    self._db_conn.commit()
             self.queue.task_done()
 
-    def is_excluded(self, path: PathLike) -> bool:
+    def is_excluded(self, path: os.PathLike) -> bool:
         # The exclude pattern is constructed bearing in mind that will
         # be called using fullmatch.
         if self.exclude is None:
@@ -126,7 +144,6 @@ class CrawlDirectory(object):
             "foreign_id": foreign_id,
             "file_name": path.name,
         }
-        log.info("Upload [%s->%s]: %s", self.collection_id, parent_id, foreign_id)
         if parent_id is not None:
             metadata["parent_id"] = parent_id
         result = self.api.ingest_upload(
@@ -148,6 +165,7 @@ def crawl_dir(
     index: bool = True,
     nojunk: bool = False,
     parallel: int = 1,
+    resume: bool = False
 ):
     """Crawl a directory and upload its content to a collection
 
@@ -158,8 +176,27 @@ def crawl_dir(
     language: language hint for the documents
     """
     root = Path(path).resolve()
+    # SQLite DB to store crawl state in the target directory
+    db_file = root / ".openaleph_crawl_state.db"
+    if not resume and db_file.exists():
+        os.remove(db_file)
+    conn = sqlite3.connect(str(db_file), check_same_thread=False)
+    conn.execute("CREATE TABLE IF NOT EXISTS processed (path TEXT PRIMARY KEY)")
+    conn.commit()
+    # Skip the DB file itself by inserting it into processed
+    conn.execute("INSERT OR IGNORE INTO processed(path) VALUES(?)",(db_file.name,))
+    conn.commit()
     collection = api.load_collection_by_foreign_id(foreign_id, config)
     crawler = CrawlDirectory(api, collection, root, index=index, nojunk=nojunk)
+    crawler._db_conn = conn
+    def _save_and_exit(signum, frame):
+        with crawler._db_lock:
+            crawler._db_conn.commit()
+        log.info(f"\nState saved to {db_file}. Exiting.")
+        sys.exit(1)
+
+    signal.signal(signal.SIGINT, _save_and_exit)
+
     consumers = []
 
     # Use one thread to produce using scandir and at least one to consume

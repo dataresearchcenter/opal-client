@@ -87,7 +87,16 @@ def cli(ctx, host, api_key, retries):
     type=click.IntRange(1),
     help="maximum number of parallel uploads",
 )
-@click.option("-f", "--foreign-id", required=True, help="foreign-id of the collection")
+@click.option(
+    "-f",
+    "--foreign-id",
+    required=True,
+    help="foreign-id of the collection")
+@click.option(
+    "--resume",
+    is_flag=True,
+    help="Resume from an existing state file"
+)
 @click.argument("path", type=click.Path(exists=True))
 @click.pass_context
 def crawldir(
@@ -99,6 +108,7 @@ def crawldir(
     noindex=False,
     nojunk=False,
     parallel=1,
+    resume=False,
 ):
     """Crawl a directory recursively and upload the documents in it to a
     collection."""
@@ -113,10 +123,10 @@ def crawldir(
             index=not noindex,
             nojunk=nojunk,
             parallel=parallel,
+            resume=resume,
         )
     except AlephException as exc:
         raise click.ClickException(str(exc))
-
 
 @cli.command()
 @click.option("-f", "--foreign-id", help="foreign_id of the collection")
