@@ -188,7 +188,7 @@ def crawl_dir(
 
     # read dot ignore file
     ignore_file = root / ".openalephignore"
-    patterns = [db_file.name, ignore_file]
+    patterns = [db_file.name, ".openalephignore"]
     if ignore_file.exists():
         for line in ignore_file.read_text(encoding="utf-8").splitlines():
             line = line.strip()
