@@ -67,13 +67,6 @@ def cli(ctx, host, api_key, retries):
     help="do not index documents after ingest",
 )
 @click.option(
-    "-d",
-    "--nojunk",
-    is_flag=True,
-    default=False,
-    help="skip dot files, Thumbs.db and other files that are junk in most cases",
-)
-@click.option(
     "-l",
     "--language",
     multiple=True,
@@ -106,7 +99,6 @@ def crawldir(
     language=None,
     casefile=False,
     noindex=False,
-    nojunk=False,
     parallel=1,
     resume=False,
 ):
@@ -121,7 +113,6 @@ def crawldir(
             foreign_id,
             config,
             index=not noindex,
-            nojunk=nojunk,
             parallel=parallel,
             resume=resume,
         )

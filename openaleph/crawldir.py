@@ -1,13 +1,13 @@
 import logging
 import threading
-import re
+from fnmatch import fnmatch
 import sqlite3
 import signal
 import sys
 import os
 from queue import Queue
-from pathlib import Path, PurePath
-from typing import cast, Optional, Dict
+from pathlib import Path
+from typing import cast, Optional, Dict, List
 
 from openaleph.api import AlephAPI
 from openaleph.errors import AlephException
@@ -23,18 +23,9 @@ class CrawlDirectory(object):
         collection: Dict,
         path: Path,
         index: bool = True,
-        nojunk: bool = False,
     ):
         self.api = api
         self.index = index
-        self.exclude = (
-            {
-                "f": re.compile(r"\..*|thumbs\.db|desktop\.ini", re.I),
-                "d": re.compile(r"\..*|\$recycle\.bin|system volume information", re.I),
-            }
-            if nojunk
-            else None
-        )
         self.collection = collection
         self.collection_id = cast(str, collection.get("id"))
         self.root = path
@@ -42,11 +33,21 @@ class CrawlDirectory(object):
         self._db_lock = threading.Lock()
         self.queue: Queue = Queue()
         self.scan_queue: Queue = Queue()
-        if path.is_dir():
-            if not self.is_excluded(path):
-                self.scan_queue.put((path, None))
-        elif not self.is_excluded(path):
-            self.queue.put((path, None))
+        self.ignore_patterns: List[str] = []
+
+    def is_ignored(self, path: Path) -> bool:
+        """
+        Skip any file or dir whose relative path matches one of the patterns.
+        A pattern ending in '/' only matches directories.
+        """
+        rel = str(path.relative_to(self.root))
+        for pat in self.ignore_patterns:
+            if pat.endswith("/") and path.is_dir():
+                if fnmatch(rel + "/", pat):
+                    return True
+            elif fnmatch(rel, pat):
+                return True
+        return False
 
     def crawl(self):
         while not self.scan_queue.empty():
@@ -83,31 +84,20 @@ class CrawlDirectory(object):
                     self._db_conn.commit()
             self.queue.task_done()
 
-    def is_excluded(self, path: os.PathLike) -> bool:
-        # The exclude pattern is constructed bearing in mind that will
-        # be called using fullmatch.
-        if self.exclude is None:
-            return False
-
-        path = Path(path)
-
-        if path.is_dir():
-            return self.exclude["d"].fullmatch(path.name) is not None
-        return self.exclude["f"].fullmatch(path.name) is not None
-
-    def scandir(self, path: Path, id: str, parent_id: str):
-        with os.scandir(path) as iterator:
-            while True:
-                child = next(iterator, None)
-                if child is None:
-                    break
-                if self.is_excluded(child):
+    def scandir(self, path: Path, id: Optional[str], parent_id: str):
+        """
+        Walk `path`, send directories to scan_queue
+        and files to queue, skipping .openalephignore entries
+        """
+        with os.scandir(path) as it:
+            for entry in it:
+                child_path = Path(entry.path)
+                if self.is_ignored(child_path):
                     continue
-                if child.is_dir():
-                    # Use a separate scan queue to avoid calling scandir recursively.
-                    self.scan_queue.put((child, id))
+                if entry.is_dir():
+                    self.scan_queue.put((child_path, parent_id))
                 else:
-                    self.queue.put((child, id))
+                    self.queue.put((child_path, parent_id))
 
     def get_foreign_id(self, path: Path) -> Optional[str]:
         if path == self.root:
@@ -163,7 +153,6 @@ def crawl_dir(
     foreign_id: str,
     config: Dict,
     index: bool = True,
-    nojunk: bool = False,
     parallel: int = 1,
     resume: bool = False
 ):
@@ -175,6 +164,14 @@ def crawl_dir(
     foreign_id: foreign_id of the collection to use.
     language: language hint for the documents
     """
+    # shut down gracefully on sigint
+    def _save_and_exit(signum, frame):
+        with crawler._db_lock:
+            crawler._db_conn.commit()
+        log.info(f"\nState saved to {db_file}. Exiting.")
+        sys.exit(1)
+    signal.signal(signal.SIGINT, _save_and_exit)
+
     root = Path(path).resolve()
     # SQLite DB to store crawl state in the target directory
     db_file = root / ".openaleph_crawl_state.db"
@@ -183,20 +180,23 @@ def crawl_dir(
     conn = sqlite3.connect(str(db_file), check_same_thread=False)
     conn.execute("CREATE TABLE IF NOT EXISTS processed (path TEXT PRIMARY KEY)")
     conn.commit()
-    # Skip the DB file itself by inserting it into processed
-    conn.execute("INSERT OR IGNORE INTO processed(path) VALUES(?)",(db_file.name,))
-    conn.commit()
+
     collection = api.load_collection_by_foreign_id(foreign_id, config)
-    crawler = CrawlDirectory(api, collection, root, index=index, nojunk=nojunk)
+
+    crawler = CrawlDirectory(api, collection, root, index=index)
     crawler._db_conn = conn
-    def _save_and_exit(signum, frame):
-        with crawler._db_lock:
-            crawler._db_conn.commit()
-        log.info(f"\nState saved to {db_file}. Exiting.")
-        sys.exit(1)
 
-    signal.signal(signal.SIGINT, _save_and_exit)
-
+    # read dot ignore file
+    ignore_file = root / ".openalephignore"
+    patterns = [db_file.name, ignore_file]
+    if ignore_file.exists():
+        for line in ignore_file.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            patterns.append(line)
+    crawler.ignore_patterns = patterns
+    crawler.scan_queue.put((root, None))
     consumers = []
 
     # Use one thread to produce using scandir and at least one to consume
