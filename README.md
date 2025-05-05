@@ -71,7 +71,7 @@ When running **crawldir**, OpenAleph maintains a small SQLite database file in y
   - Passing `--resume` skips any files recorded in this DB.
   - Omitting `--resume` deletes any existing state DB and starts fresh.
 - **Thread-safe**: uploads are recorded under a lock to support parallel threads.
-- **Cleanup**: on a clean run (no errors), the DB file is removed at the end.
+- **Update datasets later**: The db file stays in the directory, allowing you to update your local repository at any time and only sync the new files to OpenAleph.
 
 ---
 
@@ -106,3 +106,11 @@ build/
 - Blank lines and lines beginning with `#` are ignored.
 - Anything matched here is never enqueued or uploaded.
 - the `.openalephignore` file itself is ignored by default, and so is the state file
+
+## Final Report
+
+After a crawl completes, OpenAleph will print a summary to the console. If any failures occurred, by default a file is written to:
+
+`<crawl-root>/.openaleph-failed.txt`
+
+It contains one relative path per line for each file that could not be uploaded permanently. You can inspect this file to retry or investigate failures.
