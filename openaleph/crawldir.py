@@ -36,16 +36,14 @@ class CrawlDirectory(object):
         self.ignore_patterns: List[str] = []
 
     def is_ignored(self, path: Path) -> bool:
-        """
-        Skip any file or dir whose relative path matches one of the patterns.
-        A pattern ending in '/' only matches directories.
-        """
         rel = str(path.relative_to(self.root))
         for pat in self.ignore_patterns:
-            if pat.endswith("/") and path.is_dir():
-                if fnmatch(rel + "/", pat):
+            p = pat if isinstance(pat, str) else str(pat)
+            if p.endswith("/") and path.is_dir():
+                prefix = p.rstrip("/")
+                if rel == prefix or rel.startswith(prefix + "/"):
                     return True
-            elif fnmatch(rel, pat):
+            elif fnmatch(rel, p):
                 return True
         return False
 
