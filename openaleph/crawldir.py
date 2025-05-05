@@ -78,10 +78,12 @@ class CrawlDirectory(object):
 
             log.info("Upload [%s->%s]: %s", self.collection_id, parent_id, rel)
             result = self.backoff_ingest_upload(path, parent_id, self.get_foreign_id(Path(path)))
-            if result: # add path to db
-                with self._db_lock:
-                    self._db_conn.execute( "INSERT OR IGNORE INTO processed(path) VALUES(?)",(rel,))
-                    self._db_conn.commit()
+            with self._db_lock:
+                if result:
+                    self._db_conn.execute("INSERT OR IGNORE INTO processed(path) VALUES(?)", (rel,))
+                else:
+                    self._db_conn.execute("INSERT OR IGNORE INTO failed(path) VALUES(?)", (rel,))
+                self._db_conn.commit()
             self.queue.task_done()
 
     def scandir(self, path: Path, id: Optional[str], parent_id: str):
@@ -111,9 +113,7 @@ class CrawlDirectory(object):
         except ValueError:
             return None
 
-    def backoff_ingest_upload(
-        self, path: Path, parent_id: str, foreign_id: str
-    ) -> Optional[str]:
+    def backoff_ingest_upload(self, path: Path, parent_id: str, foreign_id: str) -> Optional[str]:
         try_number = 1
         while True:
             try:
@@ -179,6 +179,7 @@ def crawl_dir(
         os.remove(db_file)
     conn = sqlite3.connect(str(db_file), check_same_thread=False)
     conn.execute("CREATE TABLE IF NOT EXISTS processed (path TEXT PRIMARY KEY)")
+    conn.execute("CREATE TABLE IF NOT EXISTS failed (path TEXT PRIMARY KEY)")
     conn.commit()
 
     collection = api.load_collection_by_foreign_id(foreign_id, config)
@@ -188,7 +189,7 @@ def crawl_dir(
 
     # read dot ignore file
     ignore_file = root / ".openalephignore"
-    patterns = [db_file.name, ".openalephignore"]
+    patterns = [db_file.name, ".openalephignore", ".openaleph-failed.txt"]
     if ignore_file.exists():
         for line in ignore_file.read_text(encoding="utf-8").splitlines():
             line = line.strip()
@@ -221,3 +222,19 @@ def crawl_dir(
     # Block until all file upload queue consumers are done.
     for consumer in consumers:
         consumer.join()
+
+    # final report
+    cur = conn.execute("SELECT COUNT(*) FROM processed")
+    total_ok = cur.fetchone()[0]
+    cur = conn.execute("SELECT COUNT(*) FROM failed")
+    total_fail = cur.fetchone()[0]
+
+    log.info(f"Crawldir complete.\nUploaded (including prev. sessions if resumed): {total_ok}\nFailed: {total_fail}")
+
+    # If any failures, write them to .openaleph-failed.txt
+    if total_fail:
+        failed_file = root / ".openaleph-failed.txt"
+        with open(failed_file, "w", encoding="utf-8") as fp:
+            for row in conn.execute("SELECT path FROM failed ORDER BY path"):
+                fp.write(f"{row[0]}\n")
+        log.info(f"List of failed files written to {failed_file}")
