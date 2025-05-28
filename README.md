@@ -5,7 +5,7 @@ Python client for the OpenAleph data API.
 ## Installation
 
 ```bash
-pip install openaleph
+pip install openaleph-client
 ```
 
 ## Command-Line Interface
