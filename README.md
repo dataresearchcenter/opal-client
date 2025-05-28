@@ -1,3 +1,5 @@
+# This package was renamed to [openaleph-client](https://pypi.org/project/openaleph-client/) for clarity.
+
 # OpenAleph
 
 Python client for the OpenAleph data API.
@@ -5,7 +7,7 @@ Python client for the OpenAleph data API.
 ## Installation
 
 ```bash
-pip install openaleph
+pip install openaleph-client
 ```
 
 ## Command-Line Interface
