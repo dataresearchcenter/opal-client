@@ -4,40 +4,20 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "openaleph"
-version = "1.0.1"
-description = "Python client for the OpenAleph data API"
+version = "1.0.1.post1"
+description = "This project has been renamed. Please install 'openaleph-client'."
 readme = "README.md"
 requires-python = ">=3.7"
 license = { file = "LICENSE" }
 authors = [
   { name = "Data and Research Center - DARC", email = "hi@dataresearchcenter.org" },
 ]
+urls = { "Repository" = "https://github.com/dataresearchcenter/opal-client" }
 dependencies = [
-  "banal>=1.0.1",
-  "pyyaml",
-  "requests>=2.21.0",
-  "requests_toolbelt>=0.9.1",
-  "click>=7.0",
+  "openaleph-client>=1.0.1",
 ]
 classifiers = [
   "Programming Language :: Python :: 3",
   "License :: OSI Approved :: MIT License",
   "Operating System :: OS Independent",
 ]
-
-[project.optional-dependencies]
-dev = [
-  "mypy",
-  "wheel",
-  "pytest",
-  "pytest-mock>=1.10.0",
-  "types-requests",
-  "types-setuptools",
-]
-
-[project.scripts]
-openaleph = "openaleph.cli:cli"
-
-[tool.setuptools.packages.find]
-include = ["openaleph", "openaleph.*"]
-exclude = ["openaleph.tests", "openaleph.tests.*"]
