@@ -46,7 +46,7 @@ def _write_result(stream, result):
 @click.pass_context
 def cli(ctx, host, api_key, retries):
     """API client for OpenAleph API"""
-    logging.basicConfig(level=logging.DEBUG)
+    logging.basicConfig(level=logging.INFO)
     logging.getLogger("requests").setLevel(logging.WARNING)
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     logging.getLogger("httpstream").setLevel(logging.WARNING)
@@ -167,7 +167,7 @@ def reingest_collection(ctx, foreign_id, index=False):
         collection_id = _get_id_from_foreign_key(api, foreign_id)
         api.reingest_collection(collection_id, index=index)
     except AlephException as exc:
-        raise click.ClickException(exc.message)
+        raise click.ClickException(str(exc))
 
 
 @cli.command("reindex")
@@ -183,7 +183,7 @@ def reindex_collection(ctx, foreign_id, flush=False):
         collection_id = _get_id_from_foreign_key(api, foreign_id)
         api.reindex_collection(collection_id, flush=flush)
     except AlephException as exc:
-        raise click.ClickException(exc.message)
+        raise click.ClickException(str(exc))
 
 
 @cli.command("delete")
@@ -197,7 +197,7 @@ def delete_collection(ctx, foreign_id, sync=False):
         collection_id = _get_id_from_foreign_key(api, foreign_id)
         api.delete_collection(collection_id, sync=sync)
     except AlephException as exc:
-        raise click.ClickException(exc.message)
+        raise click.ClickException(str(exc))
 
 
 @cli.command("flush")
@@ -211,7 +211,7 @@ def flush_collection(ctx, foreign_id, sync=False):
         collection_id = _get_id_from_foreign_key(api, foreign_id)
         api.flush_collection(collection_id, sync=sync)
     except AlephException as exc:
-        raise click.ClickException(exc.message)
+        raise click.ClickException(str(exc))
 
 
 @cli.command("write-entity")
@@ -234,7 +234,7 @@ def write_entity(ctx, infile, foreign_id):
             read_json_stream(infile),
         )
     except AlephException as exc:
-        raise click.ClickException(exc.message)
+        raise click.ClickException(str(exc))
     except BrokenPipeError:
         raise click.Abort()
 
@@ -249,7 +249,7 @@ def delete_entity(ctx, entity_id):
     try:
         api.delete_entity(entity_id)
     except Exception as exc:
-        raise click.ClickException(exc.message)
+        raise click.ClickException(str(exc))
 
 
 @cli.command("write-entities")
@@ -314,7 +314,7 @@ def write_entities(
             entityset_id=entityset_id,
         )
     except AlephException as exc:
-        raise click.ClickException(exc.message)
+        raise click.ClickException(str(exc))
     except BrokenPipeError:
         raise click.Abort()
     finally:
@@ -347,7 +347,7 @@ def stream_entities(ctx, outfile, schema, foreign_id, publisher):
         )
         _write_result(outfile, res)
     except AlephException as exc:
-        raise click.ClickException(exc.message)
+        raise click.ClickException(str(exc))
     except BrokenPipeError:
         raise click.Abort()
 
@@ -367,7 +367,7 @@ def entitysets(ctx, outfile, foreign_id, type_):
         res = api.entitysets(collection_id=collection_id, set_types=type_)
         _write_result(outfile, res)
     except AlephException as exc:
-        raise click.ClickException(exc.message)
+        raise click.ClickException(str(exc))
     except BrokenPipeError:
         raise click.Abort()
 
@@ -383,7 +383,7 @@ def entitysetitems(ctx, outfile, entityset_id):
         res = api.entitysetitems(entityset_id=entityset_id)
         _write_result(outfile, res)
     except AlephException as exc:
-        raise click.ClickException(exc.message)
+        raise click.ClickException(str(exc))
     except BrokenPipeError:
         raise click.Abort()
 
@@ -402,7 +402,7 @@ def make_list(ctx, foreign_id, outfile, label, summary):
         res = api.create_entityset(collection_id, "list", label, summary)
         outfile.write(res.get("id"))
     except AlephException as exc:
-        raise click.ClickException(exc.message)
+        raise click.ClickException(str(exc))
     except BrokenPipeError:
         raise click.Abort()
 

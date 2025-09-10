@@ -17,7 +17,7 @@ from openaleph.util import backoff, prop_push
 
 log = logging.getLogger(__name__)
 MIME = "application/octet-stream"
-VERSION = importlib.metadata.version("openaleph")
+VERSION = importlib.metadata.version("openaleph-client")
 
 
 class APIResultSet(object):

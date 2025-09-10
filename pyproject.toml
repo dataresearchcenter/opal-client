@@ -4,21 +4,21 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "openaleph-client"
-version = "1.0.2"
+version = "1.0.3"
 description = "Python client for the OpenAleph data API"
 readme = "README.md"
-requires-python = ">=3.7"
+requires-python = ">=3.8"
 license = { file = "LICENSE" }
 authors = [
   { name = "Data and Research Center - DARC", email = "hi@dataresearchcenter.org" },
 ]
 urls = { "Repository" = "https://github.com/dataresearchcenter/opal-client" }
 dependencies = [
-  "banal>=1.0.1",
-  "pyyaml",
-  "requests>=2.21.0",
-  "requests_toolbelt>=0.9.1",
-  "click>=7.0",
+  "banal>=1.0.1,<2.0.0",
+  "pyyaml>=5.0.0,<7.0.0",
+  "requests>=2.21.0,<3.0.0",
+  "requests_toolbelt>=0.9.1,<1.0.0",
+  "click>=7.0,<9.0",
 ]
 classifiers = [
   "Programming Language :: Python :: 3",
