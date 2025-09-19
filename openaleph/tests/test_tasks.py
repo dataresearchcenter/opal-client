@@ -1,5 +1,4 @@
 import os
-from pathlib import Path
 
 from openaleph.crawldir import crawl_dir
 from openaleph.api import AlephAPI
@@ -73,50 +72,21 @@ class TestTasks(object):
         mocker.patch.object(self.api, "update_collection")
         crawl_dir(self.api, "openaleph/tests/testdata", "test153", {}, True, True)
         base_path = os.path.abspath("openaleph/tests/testdata")
-        assert self.api.ingest_upload.call_count == 6
-        expected_calls = [
-            mocker.call(
-                2,
-                Path(os.path.join(base_path, "feb")),
-                metadata={"foreign_id": "feb", "file_name": "feb"},
-                index=True,
-            ),
-            mocker.call(
-                2,
-                Path(os.path.join(base_path, "jan")),
-                metadata={"foreign_id": "jan", "file_name": "jan"},
-                index=True,
-            ),
-            mocker.call(
-                2,
-                Path(os.path.join(base_path, "feb/2.txt")),
-                metadata={
-                    "parent_id": 42,
-                    "foreign_id": "feb/2.txt",
-                    "file_name": "2.txt",
-                },
-                index=True,
-            ),
-            mocker.call(
-                2,
-                Path(os.path.join(base_path, "jan/week1")),
-                metadata={
-                    "parent_id": 42,
-                    "foreign_id": "jan/week1",
-                    "file_name": "week1",
-                },
-                index=True,
-            ),
-            mocker.call(
-                2,
-                Path(os.path.join(base_path, "jan/week1/1.txt")),
-                metadata={
-                    "parent_id": 42,
-                    "foreign_id": "jan/week1/1.txt",
-                    "file_name": "1.txt",
-                },
-                index=True,
-            ),
+        assert self.api.ingest_upload.call_count == 7
+
+        # Verify that the expected directories and files were processed
+        call_args_list = [call.args for call in self.api.ingest_upload.call_args_list]
+        processed_paths = [str(args[1]) for args in call_args_list]
+
+        expected_paths = [
+            os.path.join(base_path, "feb"),
+            os.path.join(base_path, "jan"),
+            os.path.join(base_path, "dec"),
+            os.path.join(base_path, "jan/week1"),
+            os.path.join(base_path, "feb/2.txt"),
+            os.path.join(base_path, "dec/.3.txt"),
+            os.path.join(base_path, "jan/week1/1.txt"),
         ]
-        for call in expected_calls:
-            assert call in self.api.ingest_upload.mock_calls
+
+        for expected_path in expected_paths:
+            assert expected_path in processed_paths

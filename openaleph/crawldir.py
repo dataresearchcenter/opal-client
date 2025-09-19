@@ -5,6 +5,8 @@ import sqlite3
 import signal
 import sys
 import os
+import tempfile
+import hashlib
 from queue import Queue
 from pathlib import Path
 from typing import cast, Optional, Dict, List
@@ -14,6 +16,40 @@ from openaleph.errors import AlephException
 from openaleph.util import backoff
 
 log = logging.getLogger(__name__)
+
+
+def get_state_file_path(target_dir: Path) -> Path:
+    """Get the path for the state file, falling back to temp dir if target is read-only."""
+    state_filename = ".openaleph_crawl_state.db"
+
+    # Try to create state file in target directory first
+    try:
+        state_file = target_dir / state_filename
+        # Test if we can write to the directory
+        test_file = target_dir / ".openaleph_write_test"
+        test_file.touch()
+        test_file.unlink()
+        return state_file
+    except (PermissionError, OSError):
+        # Fall back to temp directory with a unique name based on target path
+        path_hash = hashlib.sha256(str(target_dir.resolve()).encode()).hexdigest()[:16]
+        temp_dir = Path(tempfile.gettempdir())
+        fallback_file = temp_dir / f"openaleph_crawl_state_{path_hash}.db"
+        log.warning(f"Cannot write to target directory, using fallback state file: {fallback_file}")
+        return fallback_file
+
+
+def get_failed_file_path(target_dir: Path, state_file: Path) -> Path:
+    """Get the path for the failed files list, using same logic as state file."""
+    failed_filename = ".openaleph-failed.txt"
+
+    # If state file is in target directory, put failed file there too
+    if state_file.parent == target_dir:
+        return target_dir / failed_filename
+    else:
+        # Use same directory as state file (temp dir)
+        path_hash = hashlib.sha256(str(target_dir.resolve()).encode()).hexdigest()[:16]
+        return state_file.parent / f"openaleph_failed_{path_hash}.txt"
 
 
 class CrawlDirectory(object):
@@ -72,7 +108,7 @@ class CrawlDirectory(object):
                 if cur.fetchone():
                     self.queue.task_done()
                     log.info("Skipping [%s->%s]: %s", self.collection_id, parent_id, rel)
-                    continue # if in db skip
+                    continue  # if in db skip
 
             log.info("Upload [%s->%s]: %s", self.collection_id, parent_id, rel)
             result = self.backoff_ingest_upload(path, parent_id, self.get_foreign_id(Path(path)))
@@ -152,7 +188,8 @@ def crawl_dir(
     config: Dict,
     index: bool = True,
     parallel: int = 1,
-    resume: bool = False
+    resume: bool = False,
+    state_file: Optional[str] = None
 ):
     """Crawl a directory and upload its content to a collection
 
@@ -171,14 +208,25 @@ def crawl_dir(
     signal.signal(signal.SIGINT, _save_and_exit)
 
     root = Path(path).resolve()
-    # SQLite DB to store crawl state in the target directory
-    db_file = root / ".openaleph_crawl_state.db"
+    # SQLite DB to store crawl state, with fallback for read-only directories
+    if state_file:
+        db_file = Path(state_file)
+    else:
+        db_file = get_state_file_path(root)
+
     if not resume and db_file.exists():
         os.remove(db_file)
     conn = sqlite3.connect(str(db_file), check_same_thread=False)
     conn.execute("CREATE TABLE IF NOT EXISTS processed (path TEXT PRIMARY KEY)")
     conn.execute("CREATE TABLE IF NOT EXISTS failed (path TEXT PRIMARY KEY)")
     conn.commit()
+
+    # Log the state file location for user reference
+    log.info(f"Using state file: {db_file}")
+    if resume:
+        log.info("Resuming crawl from existing state")
+    else:
+        log.info("Starting new crawl")
 
     collection = api.load_collection_by_foreign_id(foreign_id, config)
 
@@ -187,7 +235,7 @@ def crawl_dir(
 
     # read dot ignore file
     ignore_file = root / ".openalephignore"
-    patterns = [db_file.name, ".openalephignore", ".openaleph-failed.txt"]
+    patterns = [".openaleph_crawl_state.db", ".openalephignore", ".openaleph-failed.txt"]
     if ignore_file.exists():
         for line in ignore_file.read_text(encoding="utf-8").splitlines():
             line = line.strip()
@@ -227,11 +275,17 @@ def crawl_dir(
     cur = conn.execute("SELECT COUNT(*) FROM failed")
     total_fail = cur.fetchone()[0]
 
-    log.info(f"Crawldir complete.\nUploaded (including prev. sessions if resumed): {total_ok}\nFailed: {total_fail}")
+    log.info(
+        f"Crawldir complete.\n"
+        f"Uploaded (including prev. sessions if resumed): {total_ok}\n"
+        f"Failed: {total_fail}"
+    )
+    log.info(f"State file location: {db_file}")
+    log.info("To resume this crawl, use: --resume --state-file " + str(db_file))
 
-    # If any failures, write them to .openaleph-failed.txt
+    # If any failures, write them to failed files list
     if total_fail:
-        failed_file = root / ".openaleph-failed.txt"
+        failed_file = get_failed_file_path(root, db_file)
         with open(failed_file, "w", encoding="utf-8") as fp:
             for row in conn.execute("SELECT path FROM failed ORDER BY path"):
                 fp.write(f"{row[0]}\n")

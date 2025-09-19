@@ -24,7 +24,7 @@ def _get_filename(entity):
 
 def fetch_archive(url: str, path: Path):
     with open(path, "wb") as fh:
-        res = requests.get(url)
+        res = requests.get(url, timeout=30)
         for chunk in res.iter_content(chunk_size=512 * 1024):
             if chunk:  # filter out keep-alive new chunks
                 fh.write(chunk)

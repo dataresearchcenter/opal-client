@@ -4,6 +4,7 @@ from pathlib import Path
 from openaleph.api import AlephAPI
 from openaleph.crawldir import CrawlDirectory
 
+
 class TestCrawlDirectory:
     base_path = os.path.abspath("openaleph/tests/testdata")
 

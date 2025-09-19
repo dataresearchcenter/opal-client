@@ -2,7 +2,7 @@ import json
 import click
 import logging
 import sys
-from pathlib import Path
+from importlib.metadata import version
 
 from openaleph import settings
 from openaleph.api import AlephAPI
@@ -43,6 +43,7 @@ def _write_result(stream, result):
     default=settings.MAX_TRIES,
     help="retries upon server failure",
 )
+@click.version_option(version("openaleph-client"))
 @click.pass_context
 def cli(ctx, host, api_key, retries):
     """API client for OpenAleph API"""
@@ -90,6 +91,11 @@ def cli(ctx, host, api_key, retries):
     is_flag=True,
     help="Resume from an existing state file"
 )
+@click.option(
+    "--state-file",
+    type=click.Path(),
+    help="Path to state file (for resuming from custom locations)"
+)
 @click.argument("path", type=click.Path(exists=True))
 @click.pass_context
 def crawldir(
@@ -101,6 +107,7 @@ def crawldir(
     noindex=False,
     parallel=1,
     resume=False,
+    state_file=None,
 ):
     """Crawl a directory recursively and upload the documents in it to a
     collection."""
@@ -115,9 +122,11 @@ def crawldir(
             index=not noindex,
             parallel=parallel,
             resume=resume,
+            state_file=state_file,
         )
     except AlephException as exc:
         raise click.ClickException(str(exc))
+
 
 @cli.command()
 @click.option("-f", "--foreign-id", help="foreign_id of the collection")
