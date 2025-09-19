@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "openaleph-client"
-version = "1.1.0"
+version = "1.1.1"
 description = "Python client for the OpenAleph data API"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -17,7 +17,8 @@ dependencies = [
   "banal>=1.0.1,<2.0.0",
   "pyyaml>=5.0.0,<7.0.0",
   "requests>=2.21.0,<3.0.0",
-  "requests_toolbelt>=0.9.1,<1.0.0",
+  "requests_toolbelt>=1.0.0,<2.0.0",
+  "urllib3>=1.26.0,<2.0.0",
   "click>=7.0,<9.0",
 ]
 classifiers = [
