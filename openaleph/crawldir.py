@@ -7,15 +7,91 @@ import sys
 import os
 import tempfile
 import hashlib
+import re
 from queue import Queue
 from pathlib import Path
-from typing import cast, Optional, Dict, List
+from typing import cast, Optional, Dict, List, Pattern
 
 from openaleph.api import AlephAPI
 from openaleph.errors import AlephException
 from openaleph.util import backoff
 
 log = logging.getLogger(__name__)
+
+
+class TrieNode:
+    """Trie node for efficient path prefix matching."""
+    def __init__(self):
+        self.children = {}
+        self.is_pattern = False
+        self.pattern = None
+
+
+class WhitelistMatcher:
+    """Optimized whitelist pattern matcher for large file sets."""
+    
+    def __init__(self, patterns: List[str]):
+        self.patterns = patterns
+        self.compiled_patterns: List[Pattern] = []
+        self.trie_root = TrieNode()
+        self._build_optimized_matchers()
+    
+    def _build_optimized_matchers(self):
+        """Build trie and compile regex patterns for fast matching."""
+        for pattern in self.patterns:
+            if '*' in pattern or '?' in pattern or '[' in pattern:
+                # Compile wildcard patterns as regex
+                regex_pattern = self._fnmatch_to_regex(pattern)
+                self.compiled_patterns.append(re.compile(regex_pattern))
+            else:
+                # Add literal patterns to trie for fast prefix matching
+                self._add_to_trie(pattern)
+    
+    def _fnmatch_to_regex(self, pattern: str) -> str:
+        """Convert fnmatch pattern to regex for compilation."""
+        # Convert fnmatch pattern to regex
+        regex = pattern.replace('.', '\\.')
+        regex = regex.replace('*', '.*')
+        regex = regex.replace('?', '.')
+        return f'^{regex}$'
+    
+    def _add_to_trie(self, pattern: str):
+        """Add literal pattern to trie for fast prefix matching."""
+        node = self.trie_root
+        for part in pattern.split('/'):
+            if part not in node.children:
+                node.children[part] = TrieNode()
+            node = node.children[part]
+        node.is_pattern = True
+        node.pattern = pattern
+    
+    def has_matching_prefix(self, path: str) -> bool:
+        """Check if path has a whitelisted prefix using trie."""
+        parts = path.split('/')
+        node = self.trie_root
+        
+        for i, part in enumerate(parts):
+            if part in node.children:
+                node = node.children[part]
+                if node.is_pattern:
+                    return True
+            else:
+                break
+        
+        return False
+    
+    def matches(self, path: str) -> bool:
+        """Check if path matches any whitelist pattern."""
+        # Fast trie-based prefix check
+        if self.has_matching_prefix(path):
+            return True
+        
+        # Regex pattern matching
+        for compiled_pattern in self.compiled_patterns:
+            if compiled_pattern.match(path):
+                return True
+        
+        return False
 
 
 def get_state_file_path(target_dir: Path) -> Path:
@@ -59,19 +135,24 @@ class CrawlDirectory(object):
         collection: Dict,
         path: Path,
         index: bool = True,
+        whitelist_mode: bool = False,
     ):
         self.api = api
         self.index = index
         self.collection = collection
         self.collection_id = cast(str, collection.get("id"))
         self.root = path
+        self.whitelist_mode = whitelist_mode
         self._db_conn: sqlite3.Connection = None
         self._db_lock = threading.Lock()
         self.queue: Queue = Queue()
         self.scan_queue: Queue = Queue()
         self.ignore_patterns: List[str] = []
+        self.whitelist_patterns: List[str] = []
+        self._whitelist_matcher: Optional[WhitelistMatcher] = None
 
     def is_ignored(self, path: Path) -> bool:
+        """Check if path matches any ignore pattern."""
         rel = str(path.relative_to(self.root))
         for pat in self.ignore_patterns:
             p = pat if isinstance(pat, str) else str(pat)
@@ -82,6 +163,27 @@ class CrawlDirectory(object):
             elif fnmatch(rel, p):
                 return True
         return False
+    
+    def is_whitelisted(self, path: Path) -> bool:
+        """Check if path is whitelisted for processing."""
+        if not self.whitelist_patterns or self._whitelist_matcher is None:
+            return True  # Default to allow all if no whitelist patterns
+        
+        rel = str(path.relative_to(self.root))
+        return self._whitelist_matcher.matches(rel)
+    
+    def should_process(self, path: Path) -> bool:
+        """Determine if path should be processed based on ignore/whitelist rules."""
+        # First check ignore patterns (always applied)
+        if self.is_ignored(path):
+            return False
+        
+        # If in whitelist mode or whitelist patterns exist, check whitelist
+        if self.whitelist_mode or self.whitelist_patterns:
+            return self.is_whitelisted(path)
+        
+        # Default: allow if not ignored and no whitelist restrictions
+        return True
 
     def crawl(self):
         while not self.scan_queue.empty():
@@ -128,7 +230,7 @@ class CrawlDirectory(object):
         with os.scandir(path) as it:
             for entry in it:
                 child_path = Path(entry.path)
-                if self.is_ignored(child_path):
+                if not self.should_process(child_path):
                     continue
                 if entry.is_dir():
                     self.scan_queue.put((child_path, parent_id))
@@ -189,7 +291,8 @@ def crawl_dir(
     index: bool = True,
     parallel: int = 1,
     resume: bool = False,
-    state_file: Optional[str] = None
+    state_file: Optional[str] = None,
+    whitelist_mode: bool = False
 ):
     """Crawl a directory and upload its content to a collection
 
@@ -230,19 +333,42 @@ def crawl_dir(
 
     collection = api.load_collection_by_foreign_id(foreign_id, config)
 
-    crawler = CrawlDirectory(api, collection, root, index=index)
+    crawler = CrawlDirectory(api, collection, root, index=index, whitelist_mode=whitelist_mode)
     crawler._db_conn = conn
 
-    # read dot ignore file
+    # read ignore patterns file
     ignore_file = root / ".openalephignore"
-    patterns = [".openaleph_crawl_state.db", ".openalephignore", ".openaleph-failed.txt"]
+    ignore_patterns = [".openaleph_crawl_state.db", ".openalephignore", ".openaleph-failed.txt", ".openalephwhitelist"]
     if ignore_file.exists():
         for line in ignore_file.read_text(encoding="utf-8").splitlines():
             line = line.strip()
             if not line or line.startswith("#"):
                 continue
-            patterns.append(line)
-    crawler.ignore_patterns = patterns
+            ignore_patterns.append(line)
+    crawler.ignore_patterns = ignore_patterns
+
+    # read whitelist patterns file
+    whitelist_file = root / ".openalephwhitelist"
+    whitelist_patterns = []
+    if whitelist_file.exists():
+        log.info(f"Loading whitelist patterns from {whitelist_file}")
+        for line in whitelist_file.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            whitelist_patterns.append(line)
+        crawler.whitelist_patterns = whitelist_patterns
+        crawler._whitelist_matcher = WhitelistMatcher(whitelist_patterns)
+        log.info(f"Loaded {len(whitelist_patterns)} whitelist patterns")
+    elif whitelist_mode:
+        log.warning("Whitelist mode enabled but no .openalephwhitelist file found - no files will be processed")
+    
+    # Log filtering mode
+    if whitelist_patterns:
+        mode_desc = "whitelist + ignore" if not whitelist_mode else "whitelist only"
+        log.info(f"Filtering mode: {mode_desc} ({len(whitelist_patterns)} whitelist, {len(ignore_patterns)} ignore patterns)")
+    else:
+        log.info(f"Filtering mode: ignore only ({len(ignore_patterns)} patterns)")
     crawler.scan_queue.put((root, None))
     consumers = []
 
@@ -278,7 +404,8 @@ def crawl_dir(
     log.info(
         f"Crawldir complete.\n"
         f"Uploaded (including prev. sessions if resumed): {total_ok}\n"
-        f"Failed: {total_fail}"
+        f"Failed: {total_fail}\n"
+        f"Filtering mode: {'whitelist' if crawler.whitelist_mode or crawler.whitelist_patterns else 'ignore'}"
     )
     log.info(f"State file location: {db_file}")
     log.info("To resume this crawl, use: --resume --state-file " + str(db_file))

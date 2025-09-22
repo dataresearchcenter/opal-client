@@ -96,6 +96,12 @@ def cli(ctx, host, api_key, retries):
     type=click.Path(),
     help="Path to state file (for resuming from custom locations)"
 )
+@click.option(
+    "--whitelist-mode",
+    is_flag=True,
+    default=False,
+    help="Use whitelist mode: only process files matching .openalephwhitelist patterns"
+)
 @click.argument("path", type=click.Path(exists=True))
 @click.pass_context
 def crawldir(
@@ -108,6 +114,7 @@ def crawldir(
     parallel=1,
     resume=False,
     state_file=None,
+    whitelist_mode=False,
 ):
     """Crawl a directory recursively and upload the documents in it to a
     collection."""
@@ -123,6 +130,7 @@ def crawldir(
             parallel=parallel,
             resume=resume,
             state_file=state_file,
+            whitelist_mode=whitelist_mode,
         )
     except AlephException as exc:
         raise click.ClickException(str(exc))
