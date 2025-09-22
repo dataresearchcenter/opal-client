@@ -133,7 +133,7 @@ class CrawlDirectory(object):
                 if entry.is_dir():
                     self.scan_queue.put((child_path, id))
                 else:
-                    self.queue.put((child_path, parent_id))
+                    self.queue.put((child_path, id))
 
     def get_foreign_id(self, path: Path) -> Optional[str]:
         if path == self.root:
