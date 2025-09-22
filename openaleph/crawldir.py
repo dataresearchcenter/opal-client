@@ -7,91 +7,15 @@ import sys
 import os
 import tempfile
 import hashlib
-import re
 from queue import Queue
 from pathlib import Path
-from typing import cast, Optional, Dict, List, Pattern
+from typing import cast, Optional, Dict, List
 
 from openaleph.api import AlephAPI
 from openaleph.errors import AlephException
 from openaleph.util import backoff
 
 log = logging.getLogger(__name__)
-
-
-class TrieNode:
-    """Trie node for efficient path prefix matching."""
-    def __init__(self):
-        self.children = {}
-        self.is_pattern = False
-        self.pattern = None
-
-
-class WhitelistMatcher:
-    """Optimized whitelist pattern matcher for large file sets."""
-    
-    def __init__(self, patterns: List[str]):
-        self.patterns = patterns
-        self.compiled_patterns: List[Pattern] = []
-        self.trie_root = TrieNode()
-        self._build_optimized_matchers()
-    
-    def _build_optimized_matchers(self):
-        """Build trie and compile regex patterns for fast matching."""
-        for pattern in self.patterns:
-            if '*' in pattern or '?' in pattern or '[' in pattern:
-                # Compile wildcard patterns as regex
-                regex_pattern = self._fnmatch_to_regex(pattern)
-                self.compiled_patterns.append(re.compile(regex_pattern))
-            else:
-                # Add literal patterns to trie for fast prefix matching
-                self._add_to_trie(pattern)
-    
-    def _fnmatch_to_regex(self, pattern: str) -> str:
-        """Convert fnmatch pattern to regex for compilation."""
-        # Convert fnmatch pattern to regex
-        regex = pattern.replace('.', '\\.')
-        regex = regex.replace('*', '.*')
-        regex = regex.replace('?', '.')
-        return f'^{regex}$'
-    
-    def _add_to_trie(self, pattern: str):
-        """Add literal pattern to trie for fast prefix matching."""
-        node = self.trie_root
-        for part in pattern.split('/'):
-            if part not in node.children:
-                node.children[part] = TrieNode()
-            node = node.children[part]
-        node.is_pattern = True
-        node.pattern = pattern
-    
-    def has_matching_prefix(self, path: str) -> bool:
-        """Check if path has a whitelisted prefix using trie."""
-        parts = path.split('/')
-        node = self.trie_root
-        
-        for i, part in enumerate(parts):
-            if part in node.children:
-                node = node.children[part]
-                if node.is_pattern:
-                    return True
-            else:
-                break
-        
-        return False
-    
-    def matches(self, path: str) -> bool:
-        """Check if path matches any whitelist pattern."""
-        # Fast trie-based prefix check
-        if self.has_matching_prefix(path):
-            return True
-        
-        # Regex pattern matching
-        for compiled_pattern in self.compiled_patterns:
-            if compiled_pattern.match(path):
-                return True
-        
-        return False
 
 
 def get_state_file_path(target_dir: Path) -> Path:
@@ -149,7 +73,6 @@ class CrawlDirectory(object):
         self.scan_queue: Queue = Queue()
         self.ignore_patterns: List[str] = []
         self.whitelist_patterns: List[str] = []
-        self._whitelist_matcher: Optional[WhitelistMatcher] = None
 
     def is_ignored(self, path: Path) -> bool:
         """Check if path matches any ignore pattern."""
@@ -166,11 +89,23 @@ class CrawlDirectory(object):
     
     def is_whitelisted(self, path: Path) -> bool:
         """Check if path is whitelisted for processing."""
-        if not self.whitelist_patterns or self._whitelist_matcher is None:
+        if not self.whitelist_patterns:
             return True  # Default to allow all if no whitelist patterns
         
-        rel = str(path.relative_to(self.root))
-        return self._whitelist_matcher.matches(rel)
+        # Simple extension-based matching
+        file_ext = path.suffix.lower()
+        if file_ext.startswith('.'):
+            file_ext = file_ext[1:]  # Remove the dot
+        
+        # Check if extension is in whitelist (case-insensitive)
+        for pattern in self.whitelist_patterns:
+            pattern = pattern.strip().lower()
+            if pattern.startswith('.'):
+                pattern = pattern[1:]  # Remove dot if present
+            if file_ext == pattern:
+                return True
+        
+        return False
     
     def should_process(self, path: Path) -> bool:
         """Determine if path should be processed based on ignore/whitelist rules."""
@@ -178,7 +113,11 @@ class CrawlDirectory(object):
         if self.is_ignored(path):
             return False
         
-        # If in whitelist mode or whitelist patterns exist, check whitelist
+        # Always allow directories to be scanned (whitelist only applies to files)
+        if path.is_dir():
+            return True
+        
+        # If in whitelist mode or whitelist patterns exist, check whitelist for files
         if self.whitelist_mode or self.whitelist_patterns:
             return self.is_whitelisted(path)
         
@@ -225,7 +164,7 @@ class CrawlDirectory(object):
     def scandir(self, path: Path, id: Optional[str], parent_id: str):
         """
         Walk `path`, send directories to scan_queue
-        and files to queue, skipping .openalephignore entries
+        and files to queue, applying ignore/whitelist filtering
         """
         with os.scandir(path) as it:
             for entry in it:
@@ -358,7 +297,6 @@ def crawl_dir(
                 continue
             whitelist_patterns.append(line)
         crawler.whitelist_patterns = whitelist_patterns
-        crawler._whitelist_matcher = WhitelistMatcher(whitelist_patterns)
         log.info(f"Loaded {len(whitelist_patterns)} whitelist patterns")
     elif whitelist_mode:
         log.warning("Whitelist mode enabled but no .openalephwhitelist file found - no files will be processed")
