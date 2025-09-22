@@ -131,7 +131,7 @@ class CrawlDirectory(object):
                 if self.is_ignored(child_path):
                     continue
                 if entry.is_dir():
-                    self.scan_queue.put((child_path, parent_id))
+                    self.scan_queue.put((child_path, id))
                 else:
                     self.queue.put((child_path, parent_id))
 
