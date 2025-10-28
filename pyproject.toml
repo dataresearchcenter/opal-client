@@ -38,8 +38,8 @@ dev = [
 ]
 
 [project.scripts]
-openaleph = "openaleph.cli:cli"
+openaleph = "openaleph_client.cli:cli"
 
 [tool.setuptools.packages.find]
-include = ["openaleph", "openaleph.*"]
-exclude = ["openaleph.tests", "openaleph.tests.*"]
+include = ["openaleph_client", "openaleph_client.*"]
+exclude = ["openaleph_client.tests", "openaleph_client.tests.*"]
