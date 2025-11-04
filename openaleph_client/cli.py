@@ -2,6 +2,7 @@ import json
 import click
 import logging
 import sys
+from pathlib import Path
 from importlib.metadata import version
 
 from openaleph_client import settings
@@ -9,6 +10,7 @@ from openaleph_client.api import AlephAPI
 from openaleph_client.errors import AlephException
 from openaleph_client.crawldir import crawl_dir
 from openaleph_client.fetchdir import fetch_collection, fetch_entity
+from openaleph_client.processing import build_inventory
 
 log = logging.getLogger(__name__)
 
@@ -94,7 +96,7 @@ def cli(ctx, host, api_key, retries):
 @click.option(
     "--state-file",
     type=click.Path(),
-    help="Path to state file (for resuming from custom locations)"
+    help="Path to state file (SQLite database)"
 )
 @click.argument("path", type=click.Path(exists=True))
 @click.pass_context
@@ -414,6 +416,21 @@ def make_list(ctx, foreign_id, outfile, label, summary):
         raise click.ClickException(str(exc))
     except BrokenPipeError:
         raise click.Abort()
+
+@cli.command()
+@click.option(
+    "--state-file",
+    type=click.Path(),
+    help="Path to state file (SQLite database)"
+)
+@click.argument("path", type=click.Path(exists=True))
+@click.pass_context
+def preprocess(ctx, path: str, state_file: str | None = None) -> None:
+    """Create an inventory of all the files on disk for later processing."""
+    try:
+        build_inventory(path, state_file)
+    except AlephException as exc:
+        raise click.ClickException(str(exc))
 
 
 if __name__ == "__main__":

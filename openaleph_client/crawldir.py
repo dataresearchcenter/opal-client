@@ -5,7 +5,6 @@ import sqlite3
 import signal
 import sys
 import os
-import tempfile
 import hashlib
 from queue import Queue
 from pathlib import Path
@@ -13,30 +12,10 @@ from typing import cast, Optional, Dict, List
 
 from openaleph_client.api import AlephAPI
 from openaleph_client.errors import AlephException
-from openaleph_client.util import backoff
+from openaleph_client.util import get_or_create_state_file_path, backoff
+from openaleph_client.sql import get_db_conn
 
 log = logging.getLogger(__name__)
-
-
-def get_state_file_path(target_dir: Path) -> Path:
-    """Get the path for the state file, falling back to temp dir if target is read-only."""
-    state_filename = ".openaleph_crawl_state.db"
-
-    # Try to create state file in target directory first
-    try:
-        state_file = target_dir / state_filename
-        # Test if we can write to the directory
-        test_file = target_dir / ".openaleph_write_test"
-        test_file.touch()
-        test_file.unlink()
-        return state_file
-    except (PermissionError, OSError):
-        # Fall back to temp directory with a unique name based on target path
-        path_hash = hashlib.sha256(str(target_dir.resolve()).encode()).hexdigest()[:16]
-        temp_dir = Path(tempfile.gettempdir())
-        fallback_file = temp_dir / f"openaleph_crawl_state_{path_hash}.db"
-        log.warning(f"Cannot write to target directory, using fallback state file: {fallback_file}")
-        return fallback_file
 
 
 def get_failed_file_path(target_dir: Path, state_file: Path) -> Path:
@@ -104,20 +83,21 @@ class CrawlDirectory(object):
 
             rel = str(Path(path).relative_to(self.root))
             with self._db_lock:
-                cur = self._db_conn.execute("SELECT 1 FROM processed WHERE path = ?", (rel,))
-                if cur.fetchone():
-                    self.queue.task_done()
-                    log.info("Skipping [%s->%s]: %s", self.collection_id, parent_id, rel)
-                    continue  # if in db skip
+                with self._db_conn:
+                    cur = self._db_conn.execute("SELECT 1 FROM processed WHERE path = ?", (rel,))
+                    if cur.fetchone():
+                        self.queue.task_done()
+                        log.info("Skipping [%s->%s]: %s", self.collection_id, parent_id, rel)
+                        continue  # if in db skip
 
             log.info("Upload [%s->%s]: %s", self.collection_id, parent_id, rel)
             result = self.backoff_ingest_upload(path, parent_id, self.get_foreign_id(Path(path)))
             with self._db_lock:
-                if result:
-                    self._db_conn.execute("INSERT OR IGNORE INTO processed(path) VALUES(?)", (rel,))
-                else:
-                    self._db_conn.execute("INSERT OR IGNORE INTO failed(path) VALUES(?)", (rel,))
-                self._db_conn.commit()
+                with self._db_conn:
+                    if result:
+                        self._db_conn.execute("INSERT OR IGNORE INTO processed(path) VALUES(?)", (rel,))
+                    else:
+                        self._db_conn.execute("INSERT OR IGNORE INTO failed(path) VALUES(?)", (rel,))
             self.queue.task_done()
 
     def scandir(self, path: Path, id: Optional[str], parent_id: str):
@@ -203,26 +183,27 @@ def crawl_dir(
     def _save_and_exit(signum, frame):
         with crawler._db_lock:
             crawler._db_conn.commit()
-        log.info(f"\nState saved to {db_file}. Exiting.")
+        log.info(f"\nState saved to {db_file_path}. Exiting.")
         sys.exit(1)
     signal.signal(signal.SIGINT, _save_and_exit)
 
-    root = Path(path).resolve()
     # SQLite DB to store crawl state, with fallback for read-only directories
-    if state_file:
-        db_file = Path(state_file)
-    else:
-        db_file = get_state_file_path(root)
+    # if state_file:
+    #     db_file = Path(state_file)
+    # else:
+    #     db_file = get_state_file_path(root)
+    db_file_path = get_or_create_state_file_path(path, state_file)
 
-    if not resume and db_file.exists():
-        os.remove(db_file)
-    conn = sqlite3.connect(str(db_file), check_same_thread=False)
-    conn.execute("CREATE TABLE IF NOT EXISTS processed (path TEXT PRIMARY KEY)")
-    conn.execute("CREATE TABLE IF NOT EXISTS failed (path TEXT PRIMARY KEY)")
-    conn.commit()
+    if not resume and db_file_path.exists():
+        os.remove(db_file_path)
+    
+    conn = get_db_conn(db_file_path)
+    with conn:
+        conn.execute("CREATE TABLE IF NOT EXISTS processed (path TEXT PRIMARY KEY)")
+        conn.execute("CREATE TABLE IF NOT EXISTS failed (path TEXT PRIMARY KEY)")
 
     # Log the state file location for user reference
-    log.info(f"Using state file: {db_file}")
+    log.info(f"Using state file: {db_file_path}")
     if resume:
         log.info("Resuming crawl from existing state")
     else:
@@ -230,10 +211,12 @@ def crawl_dir(
 
     collection = api.load_collection_by_foreign_id(foreign_id, config)
 
+    root = Path(path).resolve()
+
     crawler = CrawlDirectory(api, collection, root, index=index)
     crawler._db_conn = conn
 
-    # read dot ignore file
+    # Read dot ignore file
     ignore_file = root / ".openalephignore"
     patterns = [".openaleph_crawl_state.db", ".openalephignore", ".openaleph-failed.txt"]
     if ignore_file.exists():
@@ -270,20 +253,21 @@ def crawl_dir(
         consumer.join()
 
     # final report
-    cur = conn.execute("SELECT COUNT(*) FROM processed")
-    total_ok = cur.fetchone()[0]
-    cur = conn.execute("SELECT COUNT(*) FROM failed")
-    total_fail = cur.fetchone()[0]
+    with conn:
+        cur = conn.execute("SELECT COUNT(*) FROM processed")
+        total_ok = cur.fetchone()[0]
+        cur = conn.execute("SELECT COUNT(*) FROM failed")
+        total_fail = cur.fetchone()[0]
 
     log.info(f"Crawldir complete.")
     log.info(f"Uploaded (including prev. sessions if resumed): {total_ok}")
     log.info(f"Failed: {total_fail}")
-    log.info(f"State file location: {db_file}")
-    log.info("To resume this crawl, use: --resume --state-file " + str(db_file))
+    log.info(f"State file location: {db_file_path}")
+    log.info("To resume this crawl, use: --resume --state-file " + str(db_file_path))
 
     # If any failures, write them to failed files list
     if total_fail:
-        failed_file = get_failed_file_path(root, db_file)
+        failed_file = get_failed_file_path(root, db_file_path)
         with open(failed_file, "w", encoding="utf-8") as fp:
             for row in conn.execute("SELECT path FROM failed ORDER BY path"):
                 fp.write(f"{row[0]}\n")
