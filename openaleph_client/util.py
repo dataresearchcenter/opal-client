@@ -48,3 +48,26 @@ def get_or_create_state_file_path(root_path: str, state_file: str | None) -> Pat
         fallback_file_path = temp_dir / f"openaleph_crawl_state_{path_hash}.db"
         log.warning(f"Cannot write to target directory, using fallback state file: {fallback_file_path}")
         return fallback_file_path
+
+
+def adjust_psycopg3_uri(database_uri: str) -> str:
+        """Adjust PostgreSQL URI to use psycopg3 dialect if psycopg is available."""
+        if database_uri.startswith(("postgresql://", "postgres://")):
+            try:
+                import psycopg  # noqa: F401
+                log.info("Using psycopg3")
+
+                # Use psycopg3 dialect for better performance and compatibility
+                if database_uri.startswith("postgresql://"):
+                    return database_uri.replace(
+                        "postgresql://", "postgresql+psycopg://", 1
+                    )
+                elif database_uri.startswith("postgres://"):
+                    return database_uri.replace(
+                        "postgres://", "postgresql+psycopg://", 1
+                    )
+            except ImportError:
+                # Fall back to psycopg2 if psycopg3 is not available
+                log.info("Using psycopg2")
+                pass
+        return database_uri

@@ -418,17 +418,12 @@ def make_list(ctx, foreign_id, outfile, label, summary):
         raise click.Abort()
 
 @cli.command()
-@click.option(
-    "--state-file",
-    type=click.Path(),
-    help="Path to state file (SQLite database)"
-)
 @click.argument("path", type=click.Path(exists=True))
 @click.pass_context
-def preprocess(ctx, path: str, state_file: str | None = None) -> None:
+def preprocess(ctx, path: str) -> None:
     """Create an inventory of all the files on disk for later processing."""
     try:
-        build_inventory(path, state_file)
+        build_inventory(path)
     except AlephException as exc:
         raise click.ClickException(str(exc))
 
