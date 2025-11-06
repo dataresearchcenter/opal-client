@@ -13,7 +13,7 @@ from sqlalchemy.exc import (
 )
 
 from sqlalchemy.dialects.postgresql import insert
-from openaleph_client.settings import FILE_BATCH_SIZE
+from openaleph_client.settings import FILE_BATCH_SIZE, INVENTORY_TABLE_NAME
 
 log = logging.getLogger(__name__)
 
@@ -43,7 +43,7 @@ class Base(DeclarativeBase):
 
 
 class File(Base):
-    __tablename__ = "files"
+    __tablename__ = INVENTORY_TABLE_NAME
 
     id = Column(Integer, primary_key=True, autoincrement=True, unique=True)
     file_path = Column(String, nullable=False, unique=True)
