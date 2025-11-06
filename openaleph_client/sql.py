@@ -1,7 +1,41 @@
+import os
+import logging
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy import Column, Integer, String, Boolean, DateTime
 from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.exc import (
+    DatabaseError,
+    DisconnectionError,
+    OperationalError,
+    ResourceClosedError,
+    TimeoutError,
+)
+
+from sqlalchemy.dialects.postgresql import insert
+from openaleph_client.settings import FILE_BATCH_SIZE
+
+log = logging.getLogger(__name__)
+
+
+EXCEPTIONS = (
+    DatabaseError,
+    DisconnectionError,
+    OperationalError,
+    ResourceClosedError,
+    TimeoutError,
+)
+try:
+    from psycopg import DatabaseError, OperationalError
+
+    EXCEPTIONS = (DatabaseError, OperationalError, *EXCEPTIONS)
+except ImportError:
+    try:
+        from psycopg2 import DatabaseError, OperationalError
+
+        EXCEPTIONS = (DatabaseError, OperationalError, *EXCEPTIONS)
+    except ImportError:
+        pass
 
 
 class Base(DeclarativeBase):
@@ -32,7 +66,33 @@ class File(Base):
         )
 
 
-def get_db_conn(database_uri) -> Engine:
+def adjust_psycopg3_uri(database_uri: str) -> str:
+        """Adjust PostgreSQL URI to use psycopg3 dialect if psycopg is available."""
+        if database_uri.startswith(("postgresql://", "postgres://")):
+            try:
+                import psycopg  # noqa: F401
+                log.info("Using psycopg3")
+
+                # Use psycopg3 dialect for better performance and compatibility
+                if database_uri.startswith("postgresql://"):
+                    return database_uri.replace(
+                        "postgresql://", "postgresql+psycopg://", 1
+                    )
+                elif database_uri.startswith("postgres://"):
+                    return database_uri.replace(
+                        "postgres://", "postgresql+psycopg://", 1
+                    )
+            except ImportError:
+                # Fall back to psycopg2 if psycopg3 is not available
+                log.info("Using psycopg2")
+                pass
+        return database_uri
+
+
+def get_db_conn() -> Engine:
+    database_uri = os.environ.get("OPAL_CLIENT_DB", "postgresql://opal:opal@localhost/opal")
+    database_uri = adjust_psycopg3_uri(database_uri)
+
     config = {}
     config.setdefault("pool_size", 1)
     if database_uri.startswith("postgresql+psycopg://"):
@@ -46,3 +106,31 @@ def get_db_conn(database_uri) -> Engine:
     return engine
 
 
+def batch_store(values):
+    engine = get_db_conn()
+    conn = engine.connect()
+    tx = conn.begin()
+    try:
+        istmt = insert(File).values(values)
+        stmt = istmt.on_conflict_do_update(
+            constraint="files_file_path_key",
+            set_=dict(
+                # file_path=istmt.excluded.file_path,
+                # is_file=istmt.excluded.is_file,
+                # processed=istmt.excluded.processed,
+                # processed_at=istmt.excluded.processed_at,
+                # to_skip=istmt.excluded.to_skip,
+                # failed=istmt.excluded.failed,
+                opal_agent=istmt.excluded.opal_agent,
+                user=istmt.excluded.user,
+            ),
+        )
+        conn.execute(stmt)
+        tx.commit()
+        log.info(f"Processed a batch of files (max size: {FILE_BATCH_SIZE:,})")
+    except EXCEPTIONS:
+        tx.rollback()
+        log.exception("Database error storing file paths")
+        exit()
+    finally:
+        conn.close()
