@@ -13,7 +13,7 @@ from sqlalchemy.exc import (
 )
 
 from sqlalchemy.dialects.postgresql import insert
-from openaleph_client.settings import FILE_BATCH_SIZE, INVENTORY_TABLE_NAME
+from openaleph_client.settings import FILE_BATCH_SIZE, INVENTORY_TABLE_NAME, DATABASE_URI
 
 log = logging.getLogger(__name__)
 
@@ -71,7 +71,6 @@ def adjust_psycopg3_uri(database_uri: str) -> str:
         if database_uri.startswith(("postgresql://", "postgres://")):
             try:
                 import psycopg  # noqa: F401
-                log.info("Using psycopg3")
 
                 # Use psycopg3 dialect for better performance and compatibility
                 if database_uri.startswith("postgresql://"):
@@ -84,14 +83,12 @@ def adjust_psycopg3_uri(database_uri: str) -> str:
                     )
             except ImportError:
                 # Fall back to psycopg2 if psycopg3 is not available
-                log.info("Using psycopg2")
                 pass
         return database_uri
 
 
 def get_db_conn() -> Engine:
-    database_uri = os.environ.get("OPAL_CLIENT_DB", "postgresql://opal:opal@localhost/opal")
-    database_uri = adjust_psycopg3_uri(database_uri)
+    database_uri = adjust_psycopg3_uri(DATABASE_URI)
 
     config = {}
     config.setdefault("pool_size", 1)
