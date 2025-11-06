@@ -113,7 +113,7 @@ def batch_store(values):
     try:
         istmt = insert(File).values(values)
         stmt = istmt.on_conflict_do_update(
-            constraint="files_file_path_key",
+            constraint=f"{INVENTORY_TABLE_NAME}_file_path_key",
             set_=dict(
                 # file_path=istmt.excluded.file_path,
                 # is_file=istmt.excluded.is_file,
