@@ -1,6 +1,6 @@
 import os
 import logging
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, update, case, select
 from sqlalchemy.engine import Engine
 from sqlalchemy import Column, Integer, String, Boolean, DateTime
 from sqlalchemy.orm import DeclarativeBase
@@ -118,6 +118,7 @@ def batch_store(values):
                 # processed_at=istmt.excluded.processed_at,
                 # to_skip=istmt.excluded.to_skip,
                 # failed=istmt.excluded.failed,
+                # entity_id=istmt.excluded.entity_id,
                 opal_agent=istmt.excluded.opal_agent,
                 user=istmt.excluded.user,
             ),
@@ -125,6 +126,61 @@ def batch_store(values):
         conn.execute(stmt)
         tx.commit()
         log.info(f"Processed a batch of files (max size: {FILE_BATCH_SIZE:,})")
+    except EXCEPTIONS:
+        tx.rollback()
+        log.exception("Database error storing file paths")
+        exit()
+    finally:
+        conn.close()
+
+
+def batch_sync(values):
+    engine = get_db_conn()
+    conn = engine.connect()
+    tx = conn.begin()
+    try:
+        file_paths = [value["file_path"] for value in values]
+        is_file_case = case(
+            *[(File.file_path == row["file_path"], row["is_file"]) for row in values],
+            else_=File.is_file,
+        )
+        entity_id_case = case(
+            *[(File.file_path == row["file_path"], row["entity_id"]) for row in values],
+            else_=File.entity_id,
+        )
+        processed_at_case = case(
+            *[(File.file_path == row["file_path"], row["processed_at"]) for row in values],
+            else_=File.processed_at,
+        )
+        processed_case = case(
+            *[(File.file_path == row["file_path"], True) for row in values],
+            else_=File.processed,
+        )
+
+        stmt = (
+            update(File)
+            .where(File.file_path.in_(file_paths))
+            .values(
+                is_file=is_file_case,
+                entity_id=entity_id_case,
+                processed_at=processed_at_case,
+                processed=processed_case,
+            )
+        )
+        result = conn.execute(stmt)
+        tx.commit()
+        log.info(f"Processed a batch of files (max size: {FILE_BATCH_SIZE:,})")
+
+        existing_paths = {
+        row[0]
+        for row in conn.execute(
+            select(File.file_path).where(File.file_path.in_(file_paths))
+        )
+        }
+        missing = set(file_paths) - existing_paths
+        log.info(f"Updated {result.rowcount} rows.")
+        for m in missing:
+            log.error(f"No entry found with file_path='{m}' — skipping.")
     except EXCEPTIONS:
         tx.rollback()
         log.exception("Database error storing file paths")

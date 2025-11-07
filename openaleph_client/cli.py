@@ -10,7 +10,7 @@ from openaleph_client.api import AlephAPI
 from openaleph_client.errors import AlephException
 from openaleph_client.crawldir import crawl_dir
 from openaleph_client.fetchdir import fetch_collection, fetch_entity
-from openaleph_client.processing import build_inventory
+from openaleph_client.processing import build_inventory, sync
 
 log = logging.getLogger(__name__)
 
@@ -423,7 +423,21 @@ def make_list(ctx, foreign_id, outfile, label, summary):
 def preprocess(ctx, path: str) -> None:
     """Create an inventory of all the files on disk for later processing."""
     try:
+        # add "flush" - deletes DB
         build_inventory(path)
+    except AlephException as exc:
+        raise click.ClickException(str(exc))
+
+
+@cli.command()
+@click.option("--processed", type=click.Path(exists=True, file_okay=True, dir_okay=False, readable=True))
+@click.option("--ignore", type=click.Path(exists=True, file_okay=True, dir_okay=False, readable=True))
+@click.option("--allow", type=click.Path(exists=True, file_okay=True, dir_okay=False, readable=True))
+@click.pass_context
+def sync_inventory(ctx, processed, ignore, allow) -> None:
+    """Create an inventory of all the files on disk for later processing."""
+    try:
+        sync(processed, ignore, allow)        
     except AlephException as exc:
         raise click.ClickException(str(exc))
 
