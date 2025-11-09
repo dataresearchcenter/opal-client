@@ -483,7 +483,6 @@ class AlephAPI(object):
         url_path = "collections/{0}/ingest".format(collection_id)
         params = {"sync": sync, "index": index}
         url = self._make_url(url_path, params=params)
-        log.critical(url)
         if not file_path or file_path.is_dir():
             data = {"meta": json.dumps(metadata)}
             return self._request("POST", url, data=data)
@@ -524,3 +523,23 @@ class AlephAPI(object):
         """Delete an EntitySet by id"""
         url = self._make_url(f"entitysets/{entityset_id}", params={"sync": sync})
         return self._request("DELETE", url)
+
+
+def ingest_upload(path: Path, parent_id: str | None, foreign_id: str, collection_id: str, index: bool) -> str:
+    api = AlephAPI()
+    metadata = {
+        "foreign_id": foreign_id,
+        "file_name": path.name,
+    }
+    if parent_id is not None:
+        metadata["parent_id"] = parent_id
+    log.info(f"[Collection {collection_id}] Uploading {path} (parent_id {parent_id})")
+    result = api.ingest_upload(
+        collection_id,
+        path,
+        metadata=metadata,
+        index=index,
+    )
+    if "id" not in result and not hasattr(result, "id"):
+        raise AlephException(f"[Collection {collection_id}] Upload failed")
+    return result["id"]

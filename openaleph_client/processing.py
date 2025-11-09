@@ -3,21 +3,17 @@ import csv
 import pwd
 import logging
 from datetime import datetime
-from importlib.metadata import version, PackageNotFoundError
 
 from openaleph_client.sql import batch_store, batch_sync
 from openaleph_client.settings import FILE_BATCH_SIZE
+from openaleph_client.util import get_opal_agent_version, get_current_user
 
 log = logging.getLogger(__name__)
 
 
 def _build_initial_file_obj(file_path, is_file):
-    try:
-        opal_agent_version = version("openaleph-client")
-    except PackageNotFoundError:
-        opal_agent_version = None   
-
-    current_user = pwd.getpwuid(os.getuid()).pw_name
+    opal_agent_version = get_opal_agent_version()
+    current_user = get_current_user()
 
     return {
                 "file_path": os.path.normpath(file_path.path),
@@ -42,7 +38,7 @@ def _build_synced_file_obj(file_path, is_file, file_entity_id, processed_at):
     }
 
 
-def _traverse_get_file_obj(path: str | os.DirEntry[str]):
+def _traverse_get_file_obj(path: str | os.DirEntry[str]):    
     with os.scandir(path) as files_iterator:
         for file_path in files_iterator:
             try:
