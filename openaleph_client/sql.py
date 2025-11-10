@@ -1,4 +1,5 @@
 import logging
+from pathlib import Path
 from datetime import datetime
 from functools import lru_cache
 from sqlalchemy import create_engine, update, case, select, func
@@ -201,7 +202,7 @@ def get_batch(batch_size):
     try:
         stmt = (
             select(File.file_path)
-            .where(File.processed.is_(False), File.to_skip.is_(False))
+            .where(File.processed.is_(False), File.to_skip.is_(False), File.is_file.is_(True))
             .limit(batch_size)
         )
 
@@ -236,7 +237,7 @@ def mark_processed(file_path, entity_id):
                 processed=True,
                 processed_at=datetime.now(),
                 # updating this in case it has previously failed
-                failed=True,
+                failed=False,
                 opal_agent=opal_agent_version,
                 user=current_user
             )
@@ -264,6 +265,7 @@ def mark_failed(file_path):
             update(File)
             .where(File.file_path == file_path)
             .values(
+                entity_id=None,
                 processed=False,
                 processed_at=datetime.now(),
                 failed=True,
@@ -283,7 +285,7 @@ def mark_failed(file_path):
 
 
 @lru_cache
-def get_or_create_directory_id(file_path, upload_path, collection_id, index):
+def get_or_create_directory_id(file_path: str, upload_path: Path, collection_id: str, index: bool):
     engine = get_db_conn()
     conn = engine.connect()
     tx = conn.begin()
@@ -310,13 +312,14 @@ def get_or_create_directory_id(file_path, upload_path, collection_id, index):
                     entity_id = ingest_upload(upload_path, parent_id, foreign_id, collection_id, index)
                     if entity_id:
                         mark_processed(file_path, entity_id)
+                        directory_entity_id = entity_id
                 except Exception as e:
                     log.error(f"[Collection {collection_id}] Failed to upload {upload_path}. Error: {e}")
                     mark_failed(file_path)
             else:
                 # recursively call function with the path to the parent dir
                 parent_dir_path = "/".join(file_path.split("/")[:-1])
-                parent_dir_upload_path = "/".join(file_path.split("/")[:-1])
+                parent_dir_upload_path = upload_path.parent
                 directory_entity_id = get_or_create_directory_id(parent_dir_path, parent_dir_upload_path, collection_id, index)
         else:
             directory_entity_id = result
@@ -333,6 +336,7 @@ def get_or_create_directory_id(file_path, upload_path, collection_id, index):
 def count_not_processed():
     engine = get_db_conn()
     conn = engine.connect()
+    result = 0
     tx = conn.begin()
     try:
         stmt = (
@@ -344,7 +348,6 @@ def count_not_processed():
         result = conn.execute(stmt).scalar_one_or_none()
         if result:
             log.info(f"{result} files left to process")
-            return result
         
         tx.commit()
     except EXCEPTIONS:
@@ -352,3 +355,4 @@ def count_not_processed():
         log.exception("Database error getting the number of unprocessed files")
     finally:
         conn.close()
+        return result

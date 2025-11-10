@@ -50,7 +50,6 @@ def consume(root_path, values, collection_id, index):
             failed += 1
 
     log.info(f"Processed a batch of {FILE_BATCH_SIZE}. Uploaded: {uploaded}. Failed: {failed}")
-    return (uploaded, failed)
 
 
 def crawl_dir(
@@ -61,14 +60,6 @@ def crawl_dir(
     index: bool = True,
     parallel: int = 1,
 ):
-    """Crawl a directory and upload its content to a collection
-
-    params
-    ------
-    path: path of the directory
-    foreign_id: foreign_id of the collection to use.
-    language: language hint for the documents
-    """
     log.info("Starting new crawl")
 
     collection = api.load_collection_by_foreign_id(foreign_id, config)
