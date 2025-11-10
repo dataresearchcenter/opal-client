@@ -49,7 +49,7 @@ def _write_result(stream, result):
 @click.pass_context
 def cli(ctx, host, api_key, retries):
     """API client for OpenAleph API"""
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)-8s |  %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(threadName)s | %(levelname)-8s |  %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
     logging.getLogger("requests").setLevel(logging.WARNING)
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     logging.getLogger("httpstream").setLevel(logging.WARNING)

@@ -54,7 +54,6 @@ class File(Base):
     is_file = Column(Boolean, default=False)
     processed = Column(Boolean, default=False)
     processed_at = Column(DateTime, nullable=True)
-    is_processing = Column(Boolean, default=False)
     to_skip = Column(Boolean, default=False)
     failed = Column(Boolean, default=False)
     opal_agent = Column(String, nullable=True)
@@ -198,38 +197,20 @@ def get_batch(batch_size):
     conn = engine.connect()
     tx = conn.begin()
 
-    files_batch = {}
+    files_batch = []
     try:
         stmt = (
-            select(File)
-            .where(File.processed.is_(False), File.to_skip.is_(False), File.is_processing.is_(False))
+            select(File.file_path)
+            .where(File.processed.is_(False), File.to_skip.is_(False))
             .limit(batch_size)
         )
 
         result = conn.execute(stmt)
 
         if result:
-            files_batch = [{"file_path": file.file_path, "is_file": file.is_file} for file in result]
-            log.info(f"Retrieved {len(files_batch)} rows from the inventory. Marking...")
+            files_batch = result.scalars().all()
+            log.info(f"Retrieved {len(files_batch)} rows from the inventory.")
 
-            file_paths = [file_obj["file_path"] for file_obj in files_batch]
-            log.info(file_paths)
-            is_processing_case = case(
-                *[(File.file_path == row["file_path"], row["is_processing"]) for row in file_paths],
-                else_=File.is_processing,
-            )
-            stmt = (
-                update(File)
-                .where(File.file_path.in_(file_paths))
-                .values(
-                    is_processing=is_processing_case,
-                )
-            )
-            update_result = conn.execute(stmt)
-            if update_result:
-                log.info(f"Marked {update_result.rowcount} files as 'processing'.")
-            else:
-                log.info(f"{len(file_paths)} may have not been marked as 'processing' and may be processed twice.")
         tx.commit()
     except EXCEPTIONS:
         tx.rollback()
@@ -360,8 +341,7 @@ def count_not_processed():
             .where(File.processed.is_(False), File.to_skip.is_(False))
         )
 
-        result = conn.execute(stmt)
-
+        result = conn.execute(stmt).scalar_one_or_none()
         if result:
             log.info(f"{result} files left to process")
             return result

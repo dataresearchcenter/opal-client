@@ -16,4 +16,4 @@ DATABASE_URI = get_env_var("DATABASE_URI", "postgresql://opal:opal@localhost:543
 
 MAX_TRIES = int(os.environ.get("OPENALEPH_MAX_TRIES", 5))
 MEMORIOUS_RATE_LIMIT = int(os.environ.get("OPENALEPH_MEMORIOUS_RATE_LIMIT", 120))
-FILE_BATCH_SIZE = int(os.environ.get("OPENALEPH_FILE_BATCH_SIZE", 2))
+FILE_BATCH_SIZE = int(os.environ.get("OPENALEPH_FILE_BATCH_SIZE",3))
