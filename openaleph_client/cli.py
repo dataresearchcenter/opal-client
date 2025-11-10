@@ -2,6 +2,7 @@ import json
 import click
 import logging
 import sys
+from pathlib import Path
 from importlib.metadata import version
 
 from openaleph_client import settings
@@ -9,6 +10,7 @@ from openaleph_client.api import AlephAPI
 from openaleph_client.errors import AlephException
 from openaleph_client.crawldir import crawl_dir
 from openaleph_client.fetchdir import fetch_collection, fetch_entity
+from openaleph_client.processing import build_inventory, sync
 
 log = logging.getLogger(__name__)
 
@@ -47,7 +49,7 @@ def _write_result(stream, result):
 @click.pass_context
 def cli(ctx, host, api_key, retries):
     """API client for OpenAleph API"""
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)-8s |  %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(threadName)s | %(levelname)-8s |  %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
     logging.getLogger("requests").setLevel(logging.WARNING)
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     logging.getLogger("httpstream").setLevel(logging.WARNING)
@@ -59,19 +61,19 @@ def cli(ctx, host, api_key, retries):
 
 
 @cli.command()
-@click.option("--casefile", is_flag=True, default=False, help="handle as case file")
+@click.option("--casefile", is_flag=True, default=False, help="Handle as case file")
 @click.option(
     "-i",
     "--noindex",
     is_flag=True,
     default=False,
-    help="do not index documents after ingest",
+    help="Do not index documents after ingest",
 )
 @click.option(
     "-l",
     "--language",
     multiple=True,
-    help="language hint: 2-letter language code (ISO 639)",
+    help="Language hint: 2-letter language code (ISO 639)",
 )
 @click.option(
     "-p",
@@ -79,23 +81,13 @@ def cli(ctx, host, api_key, retries):
     default=1,
     show_default=True,
     type=click.IntRange(1),
-    help="maximum number of parallel uploads",
+    help="Maximum number of parallel uploads",
 )
 @click.option(
     "-f",
     "--foreign-id",
     required=True,
-    help="foreign-id of the collection")
-@click.option(
-    "--resume",
-    is_flag=True,
-    help="Resume from an existing state file"
-)
-@click.option(
-    "--state-file",
-    type=click.Path(),
-    help="Path to state file (for resuming from custom locations)"
-)
+    help="Foreign-id of the collection")
 @click.argument("path", type=click.Path(exists=True))
 @click.pass_context
 def crawldir(
@@ -106,8 +98,6 @@ def crawldir(
     casefile=False,
     noindex=False,
     parallel=1,
-    resume=False,
-    state_file=None,
 ):
     """Crawl a directory recursively and upload the documents in it to a
     collection."""
@@ -121,8 +111,6 @@ def crawldir(
             config,
             index=not noindex,
             parallel=parallel,
-            resume=resume,
-            state_file=state_file,
         )
     except AlephException as exc:
         raise click.ClickException(str(exc))
@@ -414,6 +402,30 @@ def make_list(ctx, foreign_id, outfile, label, summary):
         raise click.ClickException(str(exc))
     except BrokenPipeError:
         raise click.Abort()
+
+@cli.command()
+@click.argument("path", type=click.Path(exists=True))
+@click.pass_context
+def preprocess(ctx, path: str) -> None:
+    """Create an inventory of all the files on disk for later processing."""
+    try:
+        # add "flush" - deletes DB
+        build_inventory(path)
+    except AlephException as exc:
+        raise click.ClickException(str(exc))
+
+
+@cli.command()
+@click.option("--processed", type=click.Path(exists=True, file_okay=True, dir_okay=False, readable=True))
+@click.option("--ignore", type=click.Path(exists=True, file_okay=True, dir_okay=False, readable=True))
+@click.option("--allow", type=click.Path(exists=True, file_okay=True, dir_okay=False, readable=True))
+@click.pass_context
+def sync_inventory(ctx, processed, ignore, allow) -> None:
+    """Create an inventory of all the files on disk for later processing."""
+    try:
+        sync(processed, ignore, allow)        
+    except AlephException as exc:
+        raise click.ClickException(str(exc))
 
 
 if __name__ == "__main__":
