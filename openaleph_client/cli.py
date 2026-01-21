@@ -1,14 +1,17 @@
-import json
 import click
+import json
 import logging
 import sys
 from importlib.metadata import version
+from requests import HTTPError
 
 from openaleph_client import settings
 from openaleph_client.api import AlephAPI
 from openaleph_client.errors import AlephException
 from openaleph_client.crawldir import crawl_dir
 from openaleph_client.fetchdir import fetch_collection, fetch_entity
+from openaleph_client.load_catalog import load_catalog
+
 
 log = logging.getLogger(__name__)
 
@@ -329,6 +332,60 @@ def write_entities(
     finally:
         if sys.stdout.isatty():
             print()
+
+
+@cli.command("load-catalog")
+@click.argument("url")
+@click.option(
+    "-c",
+    "--chunksize",
+    default=1000,
+    type=click.INT,
+    help="chunk size when sending to API",
+)
+@click.option(
+    "--force", is_flag=True, default=False, help="continue after server errors"
+)
+@click.option(
+    "--unsafe", is_flag=True, default=False, help="disable server-side validation"
+)
+@click.option("--frequency", help="Add frequency label to collections")
+@click.option("--exclude", help="Exclude dataset(s)", multiple=True)
+@click.option("--include", help="Include dataset(s)", multiple=True)
+@click.pass_context
+def _load_catalog(
+    ctx,
+    url,
+    chunksize=1000,
+    force=False,
+    unsafe=False,
+    frequency=None,
+    exclude=[],
+    include=[],
+):
+    """Import a catalog from a given url"""
+    api = ctx.obj["api"]
+    try:
+        for collection_id, loader in load_catalog(
+            api,
+            url,
+            exclude_datasets=exclude,
+            include_datasets=include,
+            frequency=frequency,
+        ):
+            api.write_entities(
+                collection_id,
+                loader,
+                chunk_size=chunksize,
+                unsafe=unsafe,
+                force=force,
+            )
+    except AlephException as exc:
+        raise click.ClickException(exc.message)
+    except HTTPError as exc:
+        raise click.ClickException(str(exc))
+    except BrokenPipeError:
+        raise click.Abort()
 
 
 @cli.command("stream-entities")
