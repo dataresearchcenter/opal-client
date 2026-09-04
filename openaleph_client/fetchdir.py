@@ -24,10 +24,14 @@ def _get_filename(entity):
 
 def fetch_archive(url: str, path: Path):
     with open(path, "wb") as fh:
-        res = requests.get(url, timeout=30)
-        for chunk in res.iter_content(chunk_size=512 * 1024):
-            if chunk:  # filter out keep-alive new chunks
-                fh.write(chunk)
+        # stream=True + context manager keeps the whole archive out of memory
+        # and guarantees the connection is released; raise_for_status avoids
+        # writing an error body to disk as if it were the file.
+        with requests.get(url, timeout=30, stream=True) as res:
+            res.raise_for_status()
+            for chunk in res.iter_content(chunk_size=512 * 1024):
+                if chunk:  # filter out keep-alive new chunks
+                    fh.write(chunk)
 
 
 def fetch_object(api: AlephAPI, path: Path, entity: Dict, overwrite: bool = False):

@@ -1,7 +1,11 @@
 import os
+from pathlib import Path
 
 from openaleph_client.crawldir import crawl_dir
 from openaleph_client.api import AlephAPI
+
+# Anchor to this file's location so tests pass regardless of the pytest CWD.
+TESTDATA = str(Path(__file__).parent / "testdata")
 
 
 class TestTasks(object):
@@ -13,7 +17,7 @@ class TestTasks(object):
         mocker.patch.object(self.api, "create_collection")
         mocker.patch.object(self.api, "update_collection")
         mocker.patch.object(self.api, "ingest_upload")
-        crawl_dir(self.api, "openaleph/tests/testdata", "test153", {}, True, True)
+        crawl_dir(self.api, TESTDATA, "test153", {}, True, True)
         self.api.create_collection.assert_called_once_with(
             {
                 "category": "other",
@@ -70,8 +74,8 @@ class TestTasks(object):
             self.api, "load_collection_by_foreign_id", return_value={"id": 2}
         )
         mocker.patch.object(self.api, "update_collection")
-        crawl_dir(self.api, "openaleph/tests/testdata", "test153", {}, True, True)
-        base_path = os.path.abspath("openaleph/tests/testdata")
+        crawl_dir(self.api, TESTDATA, "test153", {}, True, True)
+        base_path = TESTDATA
         assert self.api.ingest_upload.call_count == 7
 
         # Verify that the expected directories and files were processed

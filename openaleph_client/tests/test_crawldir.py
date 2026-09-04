@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 
 from openaleph_client.api import AlephAPI
@@ -6,7 +5,7 @@ from openaleph_client.crawldir import CrawlDirectory
 
 
 class TestCrawlDirectory:
-    base_path = os.path.abspath("openaleph/tests/testdata")
+    base_path = str(Path(__file__).parent / "testdata")
 
     def test_get_foreign_id_with_dir(self):
         path = Path(self.base_path) / "jan" / "week1"

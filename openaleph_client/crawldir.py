@@ -199,14 +199,6 @@ def crawl_dir(
     foreign_id: foreign_id of the collection to use.
     language: language hint for the documents
     """
-    # shut down gracefully on sigint
-    def _save_and_exit(signum, frame):
-        with crawler._db_lock:
-            crawler._db_conn.commit()
-        log.info(f"\nState saved to {db_file}. Exiting.")
-        sys.exit(1)
-    signal.signal(signal.SIGINT, _save_and_exit)
-
     root = Path(path).resolve()
     # SQLite DB to store crawl state, with fallback for read-only directories
     if state_file:
@@ -217,74 +209,92 @@ def crawl_dir(
     if not resume and db_file.exists():
         os.remove(db_file)
     conn = sqlite3.connect(str(db_file), check_same_thread=False)
-    conn.execute("CREATE TABLE IF NOT EXISTS processed (path TEXT PRIMARY KEY)")
-    conn.execute("CREATE TABLE IF NOT EXISTS failed (path TEXT PRIMARY KEY)")
-    conn.commit()
+    try:
+        conn.execute("CREATE TABLE IF NOT EXISTS processed (path TEXT PRIMARY KEY)")
+        conn.execute("CREATE TABLE IF NOT EXISTS failed (path TEXT PRIMARY KEY)")
+        conn.commit()
 
-    # Log the state file location for user reference
-    log.info(f"Using state file: {db_file}")
-    if resume:
-        log.info("Resuming crawl from existing state")
-    else:
-        log.info("Starting new crawl")
+        # Log the state file location for user reference
+        log.info(f"Using state file: {db_file}")
+        if resume:
+            log.info("Resuming crawl from existing state")
+        else:
+            log.info("Starting new crawl")
 
-    collection = api.load_collection_by_foreign_id(foreign_id, config)
+        collection = api.load_collection_by_foreign_id(foreign_id, config)
 
-    crawler = CrawlDirectory(api, collection, root, index=index)
-    crawler._db_conn = conn
+        crawler = CrawlDirectory(api, collection, root, index=index)
+        crawler._db_conn = conn
 
-    # read dot ignore file
-    ignore_file = root / ".openalephignore"
-    patterns = [".openaleph_crawl_state.db", ".openalephignore", ".openaleph-failed.txt"]
-    if ignore_file.exists():
-        for line in ignore_file.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            patterns.append(line)
-    crawler.ignore_patterns = patterns
-    crawler.scan_queue.put((root, None))
-    consumers = []
+        # Shut down gracefully on SIGINT. Registered only now that `crawler`
+        # and `db_file` exist -- registering earlier left a window where a
+        # Ctrl-C would run the handler before `crawler` was bound and raise
+        # inside the signal handler instead of committing state.
+        def _save_and_exit(signum, frame):
+            with crawler._db_lock:
+                crawler._db_conn.commit()
+            log.info(f"\nState saved to {db_file}. Exiting.")
+            sys.exit(1)
+        signal.signal(signal.SIGINT, _save_and_exit)
 
-    # Use one thread to produce using scandir and at least one to consume
-    # files for upload.
-    producer = threading.Thread(target=crawler.crawl, daemon=True)
-    producer.start()
-    for i in range(max(1, parallel)):
-        consumer = threading.Thread(target=crawler.consume, daemon=True)
-        consumers.append(consumer)
-        consumer.start()
+        # read dot ignore file
+        ignore_file = root / ".openalephignore"
+        patterns = [".openaleph_crawl_state.db", ".openalephignore", ".openaleph-failed.txt"]
+        if ignore_file.exists():
+            for line in ignore_file.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                patterns.append(line)
+        crawler.ignore_patterns = patterns
+        crawler.scan_queue.put((root, None))
+        consumers = []
 
-    # Block until the producer is done with queueing the tree.
-    producer.join()
+        # Use one thread to produce using scandir and at least one to consume
+        # files for upload.
+        producer = threading.Thread(target=crawler.crawl, daemon=True)
+        producer.start()
+        for i in range(max(1, parallel)):
+            consumer = threading.Thread(target=crawler.consume, daemon=True)
+            consumers.append(consumer)
+            consumer.start()
 
-    # Block until the file upload queue is drained.
-    crawler.queue.join()
+        # Block until the producer is done with queueing the tree.
+        producer.join()
 
-    # Poison the queue to signal end to each consumer.
-    for consumer in consumers:
-        crawler.queue.put((None, None))
+        # Block until the file upload queue is drained.
+        crawler.queue.join()
 
-    # Block until all file upload queue consumers are done.
-    for consumer in consumers:
-        consumer.join()
+        # Poison the queue to signal end to each consumer.
+        for consumer in consumers:
+            crawler.queue.put((None, None))
 
-    # final report
-    cur = conn.execute("SELECT COUNT(*) FROM processed")
-    total_ok = cur.fetchone()[0]
-    cur = conn.execute("SELECT COUNT(*) FROM failed")
-    total_fail = cur.fetchone()[0]
+        # Block until all file upload queue consumers are done.
+        for consumer in consumers:
+            consumer.join()
 
-    log.info(f"Crawldir complete.")
-    log.info(f"Uploaded (including prev. sessions if resumed): {total_ok}")
-    log.info(f"Failed: {total_fail}")
-    log.info(f"State file location: {db_file}")
-    log.info("To resume this crawl, use: --resume --state-file " + str(db_file))
+        # final report
+        cur = conn.execute("SELECT COUNT(*) FROM processed")
+        total_ok = cur.fetchone()[0]
+        cur.close()
+        cur = conn.execute("SELECT COUNT(*) FROM failed")
+        total_fail = cur.fetchone()[0]
+        cur.close()
 
-    # If any failures, write them to failed files list
-    if total_fail:
-        failed_file = get_failed_file_path(root, db_file)
-        with open(failed_file, "w", encoding="utf-8") as fp:
-            for row in conn.execute("SELECT path FROM failed ORDER BY path"):
-                fp.write(f"{row[0]}\n")
-        log.info(f"List of failed files written to {failed_file}")
+        log.info(f"Crawldir complete.")
+        log.info(f"Uploaded (including prev. sessions if resumed): {total_ok}")
+        log.info(f"Failed: {total_fail}")
+        log.info(f"State file location: {db_file}")
+        log.info("To resume this crawl, use: --resume --state-file " + str(db_file))
+
+        # If any failures, write them to failed files list
+        if total_fail:
+            failed_file = get_failed_file_path(root, db_file)
+            with open(failed_file, "w", encoding="utf-8") as fp:
+                cur = conn.execute("SELECT path FROM failed ORDER BY path")
+                for row in cur:
+                    fp.write(f"{row[0]}\n")
+                cur.close()
+            log.info(f"List of failed files written to {failed_file}")
+    finally:
+        conn.close()

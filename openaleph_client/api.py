@@ -98,6 +98,23 @@ class AlephAPI(object):
         self.session.headers["User-Agent"] = "openaleph/%s" % VERSION
         if api_key is not None:
             self.session.headers["Authorization"] = "ApiKey %s" % api_key
+        self._closed = False
+
+    def close(self) -> None:
+        """Close the underlying HTTP session, releasing pooled connections.
+
+        Idempotent so callers can close explicitly and via the context
+        manager without double-closing.
+        """
+        if not self._closed:
+            self.session.close()
+            self._closed = True
+
+    def __enter__(self) -> "AlephAPI":
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        self.close()
 
     def _make_url(
         self,
@@ -327,11 +344,16 @@ class AlephAPI(object):
         try:
             res = self.session.get(url, params=params, stream=True)
             res.raise_for_status()
-            for entity in res.iter_lines(chunk_size=None):
-                entity = json.loads(entity)
-                yield self._patch_entity(
-                    entity, publisher=publisher, collection=collection
-                )
+            try:
+                for entity in res.iter_lines(chunk_size=None):
+                    entity = json.loads(entity)
+                    yield self._patch_entity(
+                        entity, publisher=publisher, collection=collection
+                    )
+            finally:
+                # Release the streamed socket even if the generator is
+                # abandoned mid-stream (caller stops early or raises).
+                res.close()
         except (RequestException, HTTPError) as exc:
             raise AlephException(exc) from exc
 
@@ -352,8 +374,8 @@ class AlephAPI(object):
             if cleaned:
                 params["clean"] = "false"
             try:
-                response = self.session.post(url, json=chunk, params=params)
-                response.raise_for_status()
+                with self.session.post(url, json=chunk, params=params) as response:
+                    response.raise_for_status()
                 return
             except (RequestException, HTTPError) as exc:
                 ae = AlephException(exc)
@@ -483,7 +505,6 @@ class AlephAPI(object):
         url_path = "collections/{0}/ingest".format(collection_id)
         params = {"sync": sync, "index": index}
         url = self._make_url(url_path, params=params)
-        log.critical(url)
         if not file_path or file_path.is_dir():
             data = {"meta": json.dumps(metadata)}
             return self._request("POST", url, data=data)

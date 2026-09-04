@@ -58,6 +58,15 @@ def cli(ctx, host, api_key, retries):
     ctx.obj["api"] = AlephAPI(host, api_key, retries=retries)
 
 
+@cli.result_callback()
+@click.pass_context
+def _close_api(ctx, result, **kwargs):
+    """Close the shared API session once any subcommand finishes, releasing
+    pooled HTTP connections. One place covers every subcommand."""
+    if ctx.obj and "api" in ctx.obj:
+        ctx.obj["api"].close()
+
+
 @cli.command()
 @click.option("--casefile", is_flag=True, default=False, help="handle as case file")
 @click.option(
