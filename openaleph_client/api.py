@@ -24,8 +24,8 @@ class APIResultSet(object):
     def __init__(self, api: "AlephAPI", url: str):
         self.api = api
         self.url = url
-        self.current = 0
         self.result = self.api._request("GET", self.url)
+        self.current = self.result.get("offset", 0)
 
     def __iter__(self):
         return self
@@ -175,13 +175,14 @@ class AlephAPI(object):
         """
         try:
             response = self.session.request(method=method, url=url, **kwargs)
-            response.raise_for_status()
+            try:
+                response.raise_for_status()
+                return response.json() if len(response.text) else {}
+            finally:
+                if response.raw is not None:
+                    response.close()
         except (RequestException, HTTPError) as exc:
             raise AlephException(exc) from exc
-
-        if len(response.text):
-            return response.json()
-        return {}
 
     def search(
         self,
@@ -419,8 +420,6 @@ class AlephAPI(object):
                     raise exc
                 backoff(ae, attempt)
 
-        return {}
-
     def write_entities(
         self, collection_id: str, entities: Iterable, chunk_size: int = 1000, **kw
     ):
@@ -449,15 +448,19 @@ class AlephAPI(object):
         collection_ids: Optional[str] = None,
         url: Optional[str] = None,
         publisher: bool = False,
-    ) -> Iterator[List]:
+    ) -> Iterator[Dict]:
         """Find similar entities given a sample entity."""
         params = {"collection_ids": ensure_list(collection_ids)}
         if url is None:
             url = self._make_url("match")
         try:
             response = self.session.post(url, json=entity, params=params)  # type: ignore
-            response.raise_for_status()
-            for result in response.json().get("results", []):
+            try:
+                response.raise_for_status()
+                results = response.json().get("results", [])
+            finally:
+                response.close()
+            for result in results:
                 yield self._patch_entity(result, publisher=publisher)
         except (RequestException, HTTPError) as exc:
             raise AlephException(exc) from exc
@@ -525,7 +528,6 @@ class AlephAPI(object):
                 if not ae.transient or attempt > self.retries:
                     raise ae from ae
                 backoff(ae, attempt)
-        return {}
 
     def create_entityset(
         self, collection_id: str, type: str, label: str, summary: Optional[str]

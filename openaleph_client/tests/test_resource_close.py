@@ -97,6 +97,45 @@ class TestFetchArchiveClose:
         res.__exit__.assert_called_once()
 
 
+class TestMatchClose:
+    def setup_method(self):
+        self.api = AlephAPI(host="http://openaleph.test/api/2/", api_key="fake_key")
+
+    def test_match_closes_response_when_consumed(self, mocker):
+        res = _mock_response(mocker)
+        res.json.return_value = {"results": [{"id": "1", "schema": "Thing", "properties": {}}]}
+        mocker.patch.object(self.api.session, "post", return_value=res)
+        list(self.api.match({"id": "e1", "schema": "Thing", "properties": {}}))
+        res.close.assert_called_once()
+
+    def test_match_closes_response_when_abandoned(self, mocker):
+        res = _mock_response(mocker)
+        res.json.return_value = {
+            "results": [
+                {"id": "1", "schema": "Thing", "properties": {}},
+                {"id": "2", "schema": "Thing", "properties": {}},
+            ]
+        }
+        mocker.patch.object(self.api.session, "post", return_value=res)
+        gen = self.api.match({"id": "e1", "schema": "Thing", "properties": {}})
+        next(gen)
+        gen.close()
+        res.close.assert_called_once()
+
+
+class TestRequestClose:
+    def setup_method(self):
+        self.api = AlephAPI(host="http://openaleph.test/api/2/", api_key="fake_key")
+
+    def test_request_closes_response(self, mocker):
+        res = _mock_response(mocker)
+        res.text = '{"ok": true}'
+        res.json.return_value = {"ok": True}
+        mocker.patch.object(self.api.session, "request", return_value=res)
+        self.api._request("GET", "http://openaleph.test/api/2/collections")
+        res.close.assert_called_once()
+
+
 class TestCrawlDirDbClose:
     def setup_method(self):
         self.api = AlephAPI(host="http://openaleph.test/api/2/", api_key="fake_key")

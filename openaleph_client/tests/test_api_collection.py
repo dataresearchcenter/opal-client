@@ -1,7 +1,7 @@
 import pytest
 from requests import Response
 from openaleph_client.errors import AlephException
-from openaleph_client.api import AlephAPI
+from openaleph_client.api import AlephAPI, APIResultSet
 
 
 @pytest.fixture
@@ -61,3 +61,18 @@ class TestApiCollection:
 
     def test_create_collection(self, mocker):
         pass
+
+    def test_result_set_non_zero_offset(self, mocker):
+        # APIResultSet with offset=5 should return results[0] on first call,
+        # not results[-5] (which would happen with the broken index arithmetic).
+        page = {
+            "results": [{"id": "correct"}, {"id": "wrong"}],
+            "total": 7,
+            "limit": 10,
+            "offset": 5,
+            "next": None,
+        }
+        mocker.patch.object(self.api, "_request", return_value=page)
+        rs = APIResultSet(self.api, self.fake_url + "entities")
+        item = next(rs)
+        assert item["id"] == "correct"

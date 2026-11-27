@@ -1,7 +1,6 @@
 import logging
 import requests
 from pathlib import Path
-from pprint import pprint  # noqa
 from typing import Optional, Dict
 
 from openaleph_client.api import AlephAPI
@@ -54,8 +53,8 @@ def fetch_object(api: AlephAPI, path: Path, entity: Dict, overwrite: bool = Fals
     filters = [("properties.parent", entity.get("id"))]
     results = api.search("", filters=filters, schemata="Document")
     log.info("Directory [%s]: %s (%d children)", path, file_name, len(results))
-    for entity in results:
-        fetch_object(api, object_path, entity, overwrite=overwrite)
+    for child in results:
+        fetch_object(api, object_path, child, overwrite=overwrite)
 
 
 def fetch_entity(
