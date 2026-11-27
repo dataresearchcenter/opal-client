@@ -58,6 +58,7 @@ class CrawlDirectory(object):
         api: AlephAPI,
         collection: Dict,
         path: Path,
+        conn: sqlite3.Connection,
         index: bool = True,
     ):
         self.api = api
@@ -65,7 +66,7 @@ class CrawlDirectory(object):
         self.collection = collection
         self.collection_id = cast(str, collection.get("id"))
         self.root = path
-        self._db_conn: sqlite3.Connection = None
+        self._db_conn: sqlite3.Connection = conn
         self._db_lock = threading.Lock()
         self.queue: Queue = Queue()
         self.scan_queue: Queue = Queue()
@@ -223,8 +224,7 @@ def crawl_dir(
 
         collection = api.load_collection_by_foreign_id(foreign_id, config)
 
-        crawler = CrawlDirectory(api, collection, root, index=index)
-        crawler._db_conn = conn
+        crawler = CrawlDirectory(api, collection, root, conn, index=index)
 
         # Shut down gracefully on SIGINT. Registered only now that `crawler`
         # and `db_file` exist -- registering earlier left a window where a

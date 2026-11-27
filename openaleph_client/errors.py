@@ -16,7 +16,10 @@ class AlephException(Exception):
                 data = exc.response.json()
                 self.message = data.get("message")
             except Exception:
-                self.message = exc.response.text
+                try:
+                    self.message = exc.response.text
+                except Exception:
+                    pass
 
     def __str__(self):
         return self.message
